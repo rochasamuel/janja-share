@@ -1,51 +1,61 @@
 import { useEffect, useState } from "react";
 import { HomeScreen } from "./features/home/HomeScreen.js";
 import { DiagnosticsScreen } from "./features/diagnostics/DiagnosticsScreen.js";
+import { ShareScreen } from "./features/sharing/ShareScreen.js";
+import { WatchScreen } from "./features/viewing/WatchScreen.js";
+import { useSignaling } from "./hooks/use-signaling.js";
 
 type Screen = "home" | "diagnostics" | "share" | "watch";
 type Tally = "idle" | "live" | "watching" | "error";
 
-const TALLY_LABEL: Record<Tally, string> = {
-  idle: "idle",
-  live: "live",
-  watching: "watching",
-  error: "error",
-};
-
 export function App() {
   const [screen, setScreen] = useState<Screen>("home");
-  const [tally] = useState<Tally>("idle");
+  const [tally, setTally] = useState<Tally>("idle");
+  const { client, state: signalingState } = useSignaling();
 
-  // The tray forwards its clicks here rather than acting on them, because
-  // capture and peer connections live in the webview.
   useEffect(() => {
     let dispose: (() => void) | undefined;
 
     void (async () => {
       try {
         const { listen } = await import("@tauri-apps/api/event");
-        const unlisten = await listen<string>("tray://action", (event) => {
+        dispose = await listen<string>("tray://action", (event) => {
           if (event.payload === "share") setScreen("share");
           if (event.payload === "watch") setScreen("watch");
-          if (event.payload === "stop") setScreen("home");
+          if (event.payload === "stop") setScreen("share");
         });
-        dispose = unlisten;
       } catch {
-        // Running in a plain browser during development: no tray to listen to.
+        // Running in a plain browser: no tray to listen to.
       }
     })();
 
     return () => dispose?.();
   }, []);
 
+  useEffect(() => {
+    if (screen === "share") setTally("live");
+    else if (screen === "watch") setTally("watching");
+    else setTally("idle");
+  }, [screen]);
+
+  const offline = signalingState === "failed" || signalingState === "reconnecting";
+
   return (
     <div className="app">
       <header className="masthead">
-        <span className="tally" data-state={tally} />
+        <span className="tally" data-state={offline ? "error" : tally} />
         <span className="wordmark">ScreenShare</span>
         <span className="spacer" />
-        <span className="state">{TALLY_LABEL[tally]}</span>
+        <span className="state">{offline ? "offline" : signalingState}</span>
       </header>
+
+      {offline ? (
+        <div className="notice">
+          {signalingState === "failed"
+            ? "Can't reach the server. Check that it's running, then reopen the app."
+            : "Reconnecting to the server..."}
+        </div>
+      ) : null}
 
       {screen === "home" ? (
         <HomeScreen
@@ -55,28 +65,14 @@ export function App() {
         />
       ) : null}
 
-      {screen === "diagnostics" ? (
-        <DiagnosticsScreen onBack={() => setScreen("home")} />
+      {screen === "diagnostics" ? <DiagnosticsScreen onBack={() => setScreen("home")} /> : null}
+
+      {screen === "share" && client ? (
+        <ShareScreen signaling={client} onBack={() => setScreen("home")} />
       ) : null}
 
-      {screen === "share" || screen === "watch" ? (
-        <div className="screen">
-          <div>
-            <h1 className="screen-title">
-              {screen === "share" ? "Share my screen" : "Watch a stream"}
-            </h1>
-            <p className="screen-lede">
-              Not wired up yet. Run the capture check first — it decides how
-              sharing gets built.
-            </p>
-          </div>
-          <div className="grow" />
-          <div className="footer">
-            <button className="link" onClick={() => setScreen("home")}>
-              Back
-            </button>
-          </div>
-        </div>
+      {screen === "watch" && client ? (
+        <WatchScreen signaling={client} onBack={() => setScreen("home")} />
       ) : null}
     </div>
   );

@@ -77,8 +77,9 @@ export function DiagnosticsScreen({ onBack }: Props) {
 
       {lastResult?.ok === true && lastResult.trustworthy && !lastResult.hasSystemAudio ? (
         <div className="notice" data-tone="warn">
-          Video works, but this source gives no sound. Picking a whole screen
-          instead of a single window usually fixes it.
+          Video works, but no sound came through. The Windows picker has an
+          audio option that has to be ticked before you choose a source — run
+          the check again and turn it on.
         </div>
       ) : null}
 

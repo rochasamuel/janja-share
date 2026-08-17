@@ -307,20 +307,18 @@ coturn, known WebView2 limitations, known P2P limitations, and troubleshooting.
 
 ## 12. Risks
 
-**Screen capture in WebView2 is the one unproven assumption.** WebView2 requires
-the host application to grant the `DisplayCapture` permission, and Chromium
-generally offers system audio loopback only when an entire screen is captured, not
-an individual window. WebView2 Runtime 151 on this machine is recent enough that
-this should work, but should is not verified.
+**Screen capture in WebView2 — RESOLVED 2026-08-17.** Measured in the real
+window on WebView2 151: the picker appears, video negotiates the full
+1920x1080 at 60 fps, H.264 is available, and a `System Audio` track is
+obtainable. Capture stays in TypeScript and the native Rust contingency is
+dropped. Full measurements in `spikes/capture-probe/RESULTS.md`.
 
-Mitigation: the first implementation step is a throwaway spike — a minimal Tauri 2
-window that calls `getDisplayMedia({ video: true, audio: true })` and reports what
-actually comes back: whether the picker appears, whether an audio track exists for
-full screen and for single window capture, and at what resolution and frame rate.
-Nothing is built on top until that answer exists. If it fails, the contingency is
-native capture in Rust through Windows Graphics Capture and WASAPI loopback, which
-is a materially larger project and would be re-scoped with the user rather than
-assumed.
+One prediction in this document was wrong and is corrected there: audio did
+**not** track the source kind the way Chromium's documented behaviour implies.
+Whether an audio track arrives is the user's choice in the Windows picker, and
+the app cannot force it. So the sharer asks for audio, tells the user to enable
+it before the picker opens, and — when it is missing — says so plainly and
+continues video-only rather than failing.
 
 Secondary risks: residential upload capping effective viewer count, which is
 inherent to P2P and surfaced honestly rather than hidden; and deep linking, which

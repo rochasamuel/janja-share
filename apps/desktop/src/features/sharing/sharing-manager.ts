@@ -146,7 +146,7 @@ export class SharingManager {
           "sharing",
           this.#hasSystemAudio
             ? null
-            : "Sharing without sound. Windows doesn't offer audio for this source — pick a whole screen to include it.",
+            : "Sharing without sound. To include it, stop and share again, ticking the audio option in the Windows picker.",
         );
         return;
       }
