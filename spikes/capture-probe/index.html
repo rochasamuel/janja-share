@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WebView2 capture probe</title>
+    <style>
+      body {
+        font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+        margin: 0;
+        padding: 24px;
+        background: #14161a;
+        color: #e6e8eb;
+      }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p.sub { margin: 0 0 20px; color: #8b929c; }
+      button {
+        font: inherit;
+        padding: 10px 18px;
+        margin-right: 8px;
+        border: 0;
+        border-radius: 6px;
+        background: #3d7dfb;
+        color: #fff;
+        cursor: pointer;
+      }
+      button.secondary { background: #2a2f38; }
+      pre {
+        margin-top: 20px;
+        padding: 16px;
+        border-radius: 8px;
+        background: #0d0f12;
+        border: 1px solid #262b33;
+        white-space: pre-wrap;
+        word-break: break-word;
+        min-height: 200px;
+      }
+      video { width: 100%; margin-top: 16px; border-radius: 8px; background: #000; }
+      .ok { color: #4ade80; }
+      .bad { color: #f87171; }
+    </style>
+  </head>
+  <body>
+    <h1>WebView2 capture probe</h1>
+    <p class="sub">
+      Throwaway spike. Answers whether getDisplayMedia works inside WebView2, and
+      whether it gives us a system audio track.
+    </p>
+
+    <button id="probe">Probe capture (pick ENTIRE SCREEN)</button>
+    <button id="probe-window" class="secondary">Probe capture (pick a WINDOW)</button>
+    <button id="stop" class="secondary">Stop</button>
+
+    <pre id="out">Ready. Click a probe button and choose a source in the picker.</pre>
+    <video id="preview" autoplay muted playsinline></video>
+
+    <script>
+      const out = document.getElementById("out");
+      const preview = document.getElementById("preview");
+      let current = null;
+
+      function log(line) {
+        out.textContent += "\n" + line;
+      }
+
+      function reset(label) {
+        out.textContent = `=== ${label} ===`;
+        log(`userAgent: ${navigator.userAgent}`);
+        log(`getDisplayMedia present: ${typeof navigator.mediaDevices?.getDisplayMedia === "function"}`);
+        log("Calling getDisplayMedia... (a picker should appear)");
+      }
+
+      async function probe(label) {
+        reset(label);
+        stop();
+        try {
+          const stream = await navigator.mediaDevices.getDisplayMedia({
+            video: { width: 1920, height: 1080, frameRate: 60 },
+            audio: true,
+          });
+          current = stream;
+          preview.srcObject = stream;
+
+          const video = stream.getVideoTracks();
+          const audio = stream.getAudioTracks();
+
+          log("");
+          log(`PICKER SHOWN: yes (we got a stream back)`);
+          log(`video tracks: ${video.length}`);
+          log(`AUDIO TRACKS: ${audio.length} ${audio.length ? "<-- system audio available" : "<-- NO system audio"}`);
+
+          for (const t of video) {
+            log("");
+            log(`[video] label: ${t.label}`);
+            log(`[video] settings: ${JSON.stringify(t.getSettings(), null, 2)}`);
+            log(`[video] capabilities: ${JSON.stringify(t.getCapabilities?.() ?? {}, null, 2)}`);
+          }
+          for (const t of audio) {
+            log("");
+            log(`[audio] label: ${t.label}`);
+            log(`[audio] settings: ${JSON.stringify(t.getSettings(), null, 2)}`);
+          }
+
+          log("");
+          log("contentHint support: " + ("contentHint" in (video[0] ?? {})));
+          const codecs = RTCRtpSender.getCapabilities?.("video")?.codecs ?? [];
+          log("video codecs offered by this webview:");
+          for (const c of codecs) log(`  ${c.mimeType} ${c.sdpFmtpLine ?? ""}`);
+        } catch (err) {
+          log("");
+          log(`FAILED: ${err.name}: ${err.message}`);
+          log("If this is NotAllowedError with no picker shown, the host app did not");
+          log("grant the WebView2 DisplayCapture permission.");
+        }
+      }
+
+      function stop() {
+        if (current) {
+          for (const t of current.getTracks()) t.stop();
+          current = null;
+          preview.srcObject = null;
+        }
+      }
+
+      document.getElementById("probe").onclick = () => probe("ENTIRE SCREEN");
+      document.getElementById("probe-window").onclick = () => probe("SINGLE WINDOW");
+      document.getElementById("stop").onclick = stop;
+    </script>
+  </body>
+</html>

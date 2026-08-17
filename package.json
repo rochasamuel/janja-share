@@ -1,0 +1,23 @@
+{
+  "name": "janja-share",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "dev:signal": "pnpm --filter @janja/signaling dev",
+    "dev:turn": "docker compose -f infra/coturn/docker-compose.yml up",
+    "sync:win": "bash scripts/sync-windows.sh"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}
