@@ -1,6 +1,6 @@
 mod tray;
 
-use tauri::{Manager, WindowEvent};
+use tauri::WindowEvent;
 use tray::TrayStatus;
 
 /// Lets the frontend drive the tray as its own state changes.

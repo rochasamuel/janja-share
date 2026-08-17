@@ -2,7 +2,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, AppHandle, Manager, Runtime,
+    App, AppHandle, Emitter, Manager, Runtime,
 };
 
 /// What the tray icon is currently telling the user.
