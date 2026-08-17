@@ -1,0 +1,21 @@
+# TLS terminates here. Caddy obtains and renews the certificate on its own,
+# which is the entire reason it is in this stack: WebView2 refuses ws:// from
+# a secure context, so signaling has to be wss:// and that needs a real
+# certificate.
+
+{$DOMAIN} {
+	# WebSocket upgrades pass through reverse_proxy unchanged; no special
+	# configuration is needed for them in Caddy 2.
+	reverse_proxy signaling:8787
+
+	log {
+		output stdout
+		format console
+	}
+
+	header {
+		# This host serves an API for a desktop app, never a web page.
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}

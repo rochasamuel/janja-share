@@ -13,74 +13,65 @@ screen. The installer is the easy one.
 PC, so two copies of the app pointing there will never find each other. The
 signaling server has to live somewhere with a public address.
 
-### Option A — a small VPS (what you want for anything lasting)
+### What to rent
 
-Any 1 GB box will do; the signaling process is tiny. What actually costs money
-is TURN bandwidth, and only when it is used.
+Any 1 GB box. The signaling process is tiny — it relays a few kilobytes per
+connection. What actually costs money is TURN bandwidth, and only for the
+connections that need relaying.
+
+| Provider | Rough cost | Note |
+|---|---|---|
+| Hetzner CX22 | ~€4/month | 20 TB traffic included; the value pick |
+| Contabo VPS S | ~€5/month | Generous traffic |
+| DigitalOcean | ~$6/month | 1 TB, then billed per GB |
+
+Watch the **traffic allowance**, not the CPU. A relayed 6-viewer session moves
+around 36 Mbps each way; an evening of that is tens of gigabytes.
+
+### DNS first
+
+Point an A record at the VPS before deploying. Caddy cannot obtain a
+certificate until the name resolves to the box, and everything else waits on
+that certificate.
+
+```
+screenshare.example.com.   A   <vps ip>
+```
+
+### Deploy
+
+On a fresh Ubuntu box:
 
 ```bash
-git clone <your repo> && cd janja-share/infra
-cp ../.env.example .env
+curl -fsSL https://get.docker.com | sh
+git clone <your repo> janja-share
+cd janja-share/infra
+./deploy.sh screenshare.example.com
 ```
 
-Fill in `.env`:
+That script does the whole thing: detects the public IP, warns you if DNS does
+not point at it yet, generates a TURN secret, writes `.env`, opens the firewall
+including the relay port range, starts Caddy, signaling and coturn, then waits
+for the certificate and prints the exact build command.
 
-```
-TURN_REALM=screenshare.example.com
-TURN_SECRET=<openssl rand -hex 32>
-TURN_URL=turn:screenshare.example.com:3478
-TURN_TLS_URL=turns:screenshare.example.com:5349
-```
+It is safe to re-run. It keeps the existing `TURN_SECRET` rather than
+generating a new one, because rotating that secret invalidates every credential
+already handed out.
+
+### If you would rather not rent anything yet
+
+A tunnel proves the thing works with a real friend tonight, with nothing to
+maintain:
 
 ```bash
-docker compose up -d
-```
-
-Signaling binds to `127.0.0.1:8787` on purpose — put a reverse proxy in front
-of it for TLS, because browsers and WebView2 refuse `ws://` from a secure
-context, and because the room codes should not travel in the clear.
-
-Caddy is two lines and gets a certificate on its own:
-
-```
-screenshare.example.com {
-    reverse_proxy 127.0.0.1:8787
-}
-```
-
-Then open the firewall. The relay port range is the one people forget, and it
-fails in the worst way: authentication succeeds, candidates appear, and no
-picture ever arrives.
-
-```bash
-sudo ufw allow 443/tcp
-sudo ufw allow 3478/udp
-sudo ufw allow 3478/tcp
-sudo ufw allow 5349/tcp
-sudo ufw allow 49160:49200/udp
-```
-
-If the VPS has a private NIC address (most do), uncomment `--external-ip` in
-`infra/docker-compose.yml` and set the public address. Without it coturn hands
-out addresses nobody can reach.
-
-### Option B — a tunnel (for one evening's test, no server)
-
-Good enough to prove the thing works with a real friend on a real connection,
-with nothing to rent or maintain.
-
-```bash
-pnpm dev:signal                          # your machine
+pnpm dev:signal
 cloudflared tunnel --url http://localhost:8787
 ```
 
-That prints an `https://something.trycloudflare.com` address. Build the app
-with `wss://something.trycloudflare.com`.
-
-Two honest limits. The address changes every restart, so every rebuild needs a
-new one. And a tunnel carries signaling only, not TURN — TURN needs UDP that a
-HTTP tunnel cannot pass. So friends behind strict NAT will fail to connect
-while the rest work fine. Roughly 8 in 10 succeed.
+Build against the `wss://...trycloudflare.com` address it prints. Two honest
+limits: the address changes on every restart, and a HTTP tunnel cannot carry
+TURN's UDP — so friends behind strict NAT will fail while the rest work. Around
+8 in 10 succeed.
 
 ## 2. Building the installer
 
