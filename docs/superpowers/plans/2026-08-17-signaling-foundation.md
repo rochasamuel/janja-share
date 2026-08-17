@@ -36,7 +36,7 @@ Gates the entire desktop application. Its output is an answer, not code we keep.
 - Consumes: nothing
 - Produces: a written answer recorded in `spikes/capture-probe/RESULTS.md` — whether the picker appears, whether an audio track is present for full-screen vs window capture, and the negotiated width/height/frameRate.
 
-- [ ] **Step 1: Write the probe page**
+- [x] **Step 1: Write the probe page**
 
 `spikes/capture-probe/index.html` calls `getDisplayMedia({ video: { width: 1920, height: 1080, frameRate: 60 }, audio: true })`, then dumps `track.getSettings()` and the track list into the page and into the console for both video and audio.
 
@@ -67,7 +67,7 @@ git commit -m "spike: probe WebView2 getDisplayMedia capabilities"
 **Interfaces:**
 - Produces: workspace packages resolvable as `@janja/signaling-protocol`; root scripts `dev:signal`, `test`, `sync:win`.
 
-- [ ] **Step 1: Root `package.json`**
+- [x] **Step 1: Root `package.json`**
 
 ```json
 {
@@ -84,7 +84,7 @@ git commit -m "spike: probe WebView2 getDisplayMedia capabilities"
 }
 ```
 
-- [ ] **Step 2: `pnpm-workspace.yaml`**
+- [x] **Step 2: `pnpm-workspace.yaml`**
 
 ```yaml
 packages:
@@ -92,7 +92,7 @@ packages:
   - "packages/*"
 ```
 
-- [ ] **Step 3: `tsconfig.base.json`**
+- [x] **Step 3: `tsconfig.base.json`**
 
 ```json
 {
@@ -109,7 +109,7 @@ packages:
 }
 ```
 
-- [ ] **Step 4: `scripts/sync-windows.sh`**
+- [x] **Step 4: `scripts/sync-windows.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -123,7 +123,7 @@ rsync -a --delete \
 echo "[APP] synced to $DEST"
 ```
 
-- [ ] **Step 5: `.env.example`**
+- [x] **Step 5: `.env.example`**
 
 ```
 SIGNALING_PORT=8787
@@ -137,7 +137,7 @@ TURN_TTL_SECONDS=3600
 MAX_VIEWERS=6
 ```
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run: `pnpm install`
 Expected: workspace resolves with no errors.
@@ -158,7 +158,7 @@ git add -A && git commit -m "chore: monorepo skeleton and windows sync script"
 **Interfaces:**
 - Produces: `generateRoomId(): string`, `ROOM_ID_ALPHABET`, `ROOM_ID_LENGTH`, `roomIdSchema` (zod).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -190,12 +190,12 @@ describe("generateRoomId", () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `pnpm --filter @janja/signaling-protocol test`
 Expected: FAIL, cannot resolve `./room-id.js`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ts
 import { randomBytes } from "node:crypto";
@@ -221,12 +221,12 @@ export function generateRoomId(): string {
 
 Note: modulo over a 32-character alphabet and a 256-value byte divides evenly, so there is no modulo bias here.
 
-- [ ] **Step 4: Run and confirm green**
+- [x] **Step 4: Run and confirm green**
 
 Run: `pnpm --filter @janja/signaling-protocol test`
 Expected: PASS, 4 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/signaling-protocol && git commit -m "feat: room id generation and validation"
@@ -245,7 +245,7 @@ git add packages/signaling-protocol && git commit -m "feat: room id generation a
 - Consumes: `roomIdSchema` from Task 2.
 - Produces: `clientMessageSchema`, `ClientMessage`, `ServerMessage`, `ErrorCode`, `IceServer`, and the `parseClientMessage(raw: string)` helper returning `{ ok: true, message } | { ok: false, code: "INVALID_MESSAGE" }`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -285,12 +285,12 @@ describe("parseClientMessage", () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `pnpm --filter @janja/signaling-protocol test`
 Expected: FAIL, cannot resolve `./messages.js`.
 
-- [ ] **Step 3: Implement the schemas**
+- [x] **Step 3: Implement the schemas**
 
 ```ts
 import { z } from "zod";
@@ -359,19 +359,19 @@ export function parseClientMessage(
 }
 ```
 
-- [ ] **Step 4: Re-export from the package entrypoint**
+- [x] **Step 4: Re-export from the package entrypoint**
 
 ```ts
 export * from "./room-id.js";
 export * from "./messages.js";
 ```
 
-- [ ] **Step 5: Run and confirm green**
+- [x] **Step 5: Run and confirm green**
 
 Run: `pnpm --filter @janja/signaling-protocol test`
 Expected: PASS, 10 tests total across both files.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/signaling-protocol && git commit -m "feat: typed and validated signaling protocol"
@@ -411,7 +411,7 @@ class RoomManager {
 }
 ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 import { beforeEach, describe, expect, it } from "vitest";
@@ -487,21 +487,21 @@ describe("RoomManager", () => {
 });
 ```
 
-- [ ] **Step 2: Run and watch it fail**
+- [x] **Step 2: Run and watch it fail**
 
 Run: `pnpm --filter @janja/signaling test`
 Expected: FAIL, cannot resolve `./room-manager.js`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Back the class with two maps: `rooms: Map<roomId, Room>` and `sessionRooms: Map<sessionId, roomId>`, so `removeSession` is O(1) and cannot leave a dangling session. `createRoom` regenerates on the astronomically unlikely id collision.
 
-- [ ] **Step 4: Run and confirm green**
+- [x] **Step 4: Run and confirm green**
 
 Run: `pnpm --filter @janja/signaling test`
 Expected: PASS, 9 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/signaling && git commit -m "feat: in-memory room manager with viewer isolation"
@@ -518,7 +518,7 @@ git add apps/signaling && git commit -m "feat: in-memory room manager with viewe
 **Interfaces:**
 - Produces: `buildIceServers(config: IceConfig, sessionId: string, now?: number): IceServer[]` where `IceConfig` is `{ stunUrl?: string; turnUrl?: string; turnTlsUrl?: string; turnSecret?: string; ttlSeconds: number }`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 import { createHmac } from "node:crypto";
@@ -568,12 +568,12 @@ describe("buildIceServers", () => {
 });
 ```
 
-- [ ] **Step 2: Run and watch it fail**
+- [x] **Step 2: Run and watch it fail**
 
 Run: `pnpm --filter @janja/signaling test -- ice-servers`
 Expected: FAIL, cannot resolve `./ice-servers.js`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ts
 import { createHmac } from "node:crypto";
@@ -605,12 +605,12 @@ export function buildIceServers(config: IceConfig, sessionId: string, now = Date
 }
 ```
 
-- [ ] **Step 4: Run and confirm green**
+- [x] **Step 4: Run and confirm green**
 
 Run: `pnpm --filter @janja/signaling test -- ice-servers`
 Expected: PASS, 4 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/signaling && git commit -m "feat: temporary coturn REST credentials"
@@ -630,7 +630,7 @@ git add apps/signaling && git commit -m "feat: temporary coturn REST credentials
 - Consumes: `RoomManager` (Task 4), `buildIceServers` (Task 5), `parseClientMessage` (Task 3).
 - Produces: `createSignalingServer(options): { port: number; close(): Promise<void> }`.
 
-- [ ] **Step 1: Write the failing integration tests**
+- [x] **Step 1: Write the failing integration tests**
 
 Tests drive a real server on an ephemeral port with real `ws` clients and a small `connect()` / `nextMessage()` helper. Cover, at minimum:
 
@@ -651,29 +651,29 @@ Tests drive a real server on an ephemeral port with real `ws` clients and a smal
 - exceeding the message rate limit yields error RATE_LIMITED
 ```
 
-- [ ] **Step 2: Run and watch them fail**
+- [x] **Step 2: Run and watch them fail**
 
 Run: `pnpm --filter @janja/signaling test -- server`
 Expected: FAIL, cannot resolve `./server.js`.
 
-- [ ] **Step 3: Implement the server**
+- [x] **Step 3: Implement the server**
 
 Each socket gets a server-generated `sessionId` and a token-bucket rate limiter. The handler resolves the sender's room via `getRoomForSession`, checks the sender-to-target authorization rule, and forwards. Unknown targets, cross-room targets, and viewer-to-viewer attempts all return `NOT_AUTHORIZED`. The whole handler body sits inside a try/catch that replies `INTERNAL` rather than throwing. Heartbeats use `ws` ping/pong with a 30 s interval and terminate silent sockets.
 
-- [ ] **Step 4: Run and confirm green**
+- [x] **Step 4: Run and confirm green**
 
 Run: `pnpm --filter @janja/signaling test`
 Expected: PASS, all suites.
 
-- [ ] **Step 5: Add the `/api/ice-servers` HTTP route**
+- [x] **Step 5: Add the `/api/ice-servers` HTTP route**
 
 Same HTTP server that hosts the WebSocket upgrade. Returns `{ iceServers }` for a fresh session id. Rate limited by IP.
 
-- [ ] **Step 6: Manual smoke test**
+- [x] **Step 6: Manual smoke test**
 
 Run: `pnpm dev:signal`, then connect with `websocat` or a scratch script; confirm a room is created and its id looks like `7DS4B2`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/signaling && git commit -m "feat: websocket signaling server with authorization and rate limiting"
