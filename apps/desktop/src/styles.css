@@ -1,0 +1,393 @@
+/* ScreenShare — a small piece of transmission equipment that happens to be
+   a window. Tokens first; nothing below invents a colour of its own. */
+
+:root {
+  /* Ground: deep slate rather than black, so the tally light has something
+     to sit against without glaring. */
+  --ground: #12161c;
+  --panel: #1a1f27;
+  --panel-raised: #222835;
+  --recess: #0d1116;
+  --edge: #2b3341;
+  --edge-bright: #3a4557;
+
+  --ink: #e8ecf2;
+  --ink-dim: #98a2b3;
+  --ink-faint: #6b7688;
+
+  /* Tally amber: a studio on-air light, not a generic success green. */
+  --live: #f5a524;
+  --live-glow: rgba(245, 165, 36, 0.35);
+  --watch: #4cc2ff;
+  --watch-glow: rgba(76, 194, 255, 0.3);
+  --fault: #e5484d;
+  --ok: #46a758;
+
+  --display: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+
+  --step: 8px;
+  --radius: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  /* A utility window is not a document: nothing here should be selectable
+     except the things a user needs to copy. */
+  user-select: none;
+  cursor: default;
+  overflow: hidden;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: calc(var(--step) * 3);
+  gap: calc(var(--step) * 2);
+}
+
+/* --- masthead --------------------------------------------------------- */
+
+.masthead {
+  display: flex;
+  align-items: center;
+  gap: var(--step);
+  padding-bottom: calc(var(--step) * 2);
+  border-bottom: 1px solid var(--edge);
+}
+
+.wordmark {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.masthead .spacer {
+  flex: 1;
+}
+
+.masthead .state {
+  font-family: var(--display);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* --- tally light ------------------------------------------------------ */
+
+.tally {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  flex: none;
+}
+
+.tally[data-state="live"] {
+  background: var(--live);
+  box-shadow: 0 0 0 3px var(--live-glow);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+
+.tally[data-state="watching"] {
+  background: var(--watch);
+  box-shadow: 0 0 0 3px var(--watch-glow);
+}
+
+.tally[data-state="error"] {
+  background: var(--fault);
+  box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.3);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px var(--live-glow);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(245, 165, 36, 0.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tally[data-state="live"] {
+    animation: none;
+  }
+}
+
+/* --- screen scaffolding ----------------------------------------------- */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: calc(var(--step) * 2);
+}
+
+.screen-lede {
+  color: var(--ink-dim);
+  font-size: 13px;
+  margin: 0;
+}
+
+.screen-title {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step);
+}
+
+.grow {
+  flex: 1;
+  min-height: 0;
+}
+
+/* --- equipment switches (the two primary actions) --------------------- */
+
+.switch {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: calc(var(--step) * 2);
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--panel-raised), var(--panel));
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 80ms ease;
+}
+
+.switch:hover {
+  border-color: var(--edge-bright);
+}
+
+.switch:active {
+  transform: translateY(1px);
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--watch);
+  outline-offset: 2px;
+}
+
+.switch .label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.switch .hint {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+/* --- the room code plate: the one thing people read aloud ------------- */
+
+.plate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--step);
+  padding: calc(var(--step) * 3) calc(var(--step) * 2);
+  background: var(--recess);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+.plate .caption {
+  font-family: var(--display);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.plate .code {
+  font-family: var(--display);
+  font-size: 38px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  /* The tracking pushes the glyphs right; pull the block back to centre. */
+  text-indent: 0.18em;
+  color: var(--ink);
+  user-select: text;
+  cursor: text;
+}
+
+/* --- buttons ---------------------------------------------------------- */
+
+.button {
+  font: inherit;
+  font-size: 13px;
+  padding: 10px var(--step);
+  color: var(--ink);
+  background: var(--panel-raised);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+
+.button:hover {
+  border-color: var(--edge-bright);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--watch);
+  outline-offset: 2px;
+}
+
+.button[data-variant="danger"] {
+  color: var(--fault);
+  border-color: rgba(229, 72, 77, 0.4);
+}
+
+.button[data-variant="primary"] {
+  background: var(--watch);
+  border-color: var(--watch);
+  color: #05202e;
+  font-weight: 600;
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.button-row {
+  display: flex;
+  gap: var(--step);
+}
+
+.button-row > * {
+  flex: 1;
+}
+
+/* --- readouts --------------------------------------------------------- */
+
+.readout {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--display);
+  font-size: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+.readout .key {
+  color: var(--ink-faint);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+.readout .value {
+  color: var(--ink);
+}
+
+.readout .value[data-tone="ok"] {
+  color: var(--ok);
+}
+
+.readout .value[data-tone="fault"] {
+  color: var(--fault);
+}
+
+/* --- log -------------------------------------------------------------- */
+
+.log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--step);
+  background: var(--recess);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  font-family: var(--display);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+/* --- footer ----------------------------------------------------------- */
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--step);
+  padding-top: var(--step);
+  border-top: 1px solid var(--edge);
+}
+
+.link {
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-faint);
+  background: none;
+  border: 0;
+  padding: 4px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.link:hover {
+  color: var(--ink-dim);
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--watch);
+  outline-offset: 2px;
+}
+
+.notice {
+  padding: var(--step) calc(var(--step) * 1.5);
+  border-radius: 8px;
+  font-size: 12px;
+  background: rgba(229, 72, 77, 0.1);
+  border: 1px solid rgba(229, 72, 77, 0.3);
+  color: #ffb4b6;
+}
+
+.notice[data-tone="warn"] {
+  background: rgba(245, 165, 36, 0.1);
+  border-color: rgba(245, 165, 36, 0.3);
+  color: #ffd79a;
+}
