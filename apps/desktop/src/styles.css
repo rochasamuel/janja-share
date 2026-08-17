@@ -1,33 +1,33 @@
-/* ScreenShare — a small piece of transmission equipment that happens to be
-   a window. Tokens first; nothing below invents a colour of its own. */
+/* ScreenShare — a tray popover.
+   The window itself is transparent and undecorated; everything visible is
+   painted by .panel below, which is why nothing here may use an opaque body
+   background. */
 
 :root {
-  /* Ground: deep slate rather than black, so the tally light has something
-     to sit against without glaring. */
-  --ground: #12161c;
-  --panel: #1a1f27;
-  --panel-raised: #222835;
-  --recess: #0d1116;
-  --edge: #2b3341;
-  --edge-bright: #3a4557;
+  /* Ink-violet, matching the frosted acrylic the OS puts behind it. */
+  --panel-bg: rgba(26, 22, 34, 0.82);
+  --panel-edge: rgba(255, 255, 255, 0.09);
+  --panel-radius: 14px;
 
-  --ink: #e8ecf2;
-  --ink-dim: #98a2b3;
-  --ink-faint: #6b7688;
+  --row-hover: rgba(255, 255, 255, 0.06);
+  --hairline: rgba(255, 255, 255, 0.07);
+  --recess: rgba(0, 0, 0, 0.28);
+  --dashed: rgba(255, 255, 255, 0.16);
 
-  /* Tally amber: a studio on-air light, not a generic success green. */
+  --ink: #ece9f2;
+  --ink-dim: #a49fb4;
+  --ink-faint: #6f6a80;
+
+  --accent: #8b7cf6;
   --live: #f5a524;
-  --live-glow: rgba(245, 165, 36, 0.35);
-  --watch: #4cc2ff;
-  --watch-glow: rgba(76, 194, 255, 0.3);
-  --fault: #e5484d;
-  --ok: #46a758;
+  --live-glow: rgba(245, 165, 36, 0.3);
+  --watch: #56b6ff;
+  --watch-glow: rgba(86, 182, 255, 0.28);
+  --fault: #f2555a;
+  --ok: #4ec27f;
 
-  --display: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
   --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-
-  --step: 8px;
-  --radius: 10px;
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
 }
 
 * {
@@ -38,58 +38,62 @@ html,
 body,
 #root {
   height: 100%;
+  margin: 0;
 }
 
 body {
-  margin: 0;
-  background: var(--ground);
+  /* Must stay transparent: the OS blur lives behind this. */
+  background: transparent;
   color: var(--ink);
   font-family: var(--ui);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
-  /* A utility window is not a document: nothing here should be selectable
-     except the things a user needs to copy. */
   user-select: none;
   cursor: default;
   overflow: hidden;
 }
 
-.app {
+/* --- the panel -------------------------------------------------------- */
+
+.panel {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: calc(var(--step) * 3);
-  gap: calc(var(--step) * 2);
+  padding: 6px;
+  gap: 2px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--panel-radius);
+  /* Clips the rounded corners over the transparent window. */
+  overflow: hidden;
 }
 
-/* --- masthead --------------------------------------------------------- */
+/* --- header ----------------------------------------------------------- */
 
-.masthead {
+.header {
   display: flex;
   align-items: center;
-  gap: var(--step);
-  padding-bottom: calc(var(--step) * 2);
-  border-bottom: 1px solid var(--edge);
+  gap: 8px;
+  padding: 8px 10px 6px;
+  -webkit-app-region: drag;
 }
 
-.wordmark {
-  font-family: var(--display);
-  font-size: 13px;
+.header .wordmark {
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--ink);
 }
 
-.masthead .spacer {
+.header .spacer {
   flex: 1;
 }
 
-.masthead .state {
-  font-family: var(--display);
-  font-size: 11px;
-  letter-spacing: 0.1em;
+.header .state {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-faint);
 }
@@ -97,8 +101,8 @@ body {
 /* --- tally light ------------------------------------------------------ */
 
 .tally {
-  width: 9px;
-  height: 9px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--ink-faint);
   flex: none;
@@ -117,7 +121,7 @@ body {
 
 .tally[data-state="error"] {
   background: var(--fault);
-  box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.3);
+  box-shadow: 0 0 0 3px rgba(242, 85, 90, 0.28);
 }
 
 @keyframes pulse {
@@ -126,7 +130,7 @@ body {
     box-shadow: 0 0 0 3px var(--live-glow);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(245, 165, 36, 0.08);
+    box-shadow: 0 0 0 6px rgba(245, 165, 36, 0.06);
   }
 }
 
@@ -136,185 +140,147 @@ body {
   }
 }
 
-/* --- screen scaffolding ----------------------------------------------- */
+/* --- status card: the dashed slab at the top -------------------------- */
 
-.screen {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  gap: calc(var(--step) * 2);
-}
-
-.screen-lede {
-  color: var(--ink-dim);
-  font-size: 13px;
-  margin: 0;
-}
-
-.screen-title {
-  font-size: 17px;
-  font-weight: 600;
-  margin: 0;
-  letter-spacing: -0.01em;
-}
-
-.stack {
-  display: flex;
-  flex-direction: column;
-  gap: var(--step);
-}
-
-.grow {
-  flex: 1;
-  min-height: 0;
-}
-
-/* --- equipment switches (the two primary actions) --------------------- */
-
-.switch {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  padding: calc(var(--step) * 2);
-  text-align: left;
-  font: inherit;
-  color: var(--ink);
-  background: linear-gradient(180deg, var(--panel-raised), var(--panel));
-  border: 1px solid var(--edge);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: border-color 120ms ease, transform 80ms ease;
-}
-
-.switch:hover {
-  border-color: var(--edge-bright);
-}
-
-.switch:active {
-  transform: translateY(1px);
-}
-
-.switch:focus-visible {
-  outline: 2px solid var(--watch);
-  outline-offset: 2px;
-}
-
-.switch .label {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.switch .hint {
-  font-size: 12px;
-  color: var(--ink-dim);
-}
-
-/* --- the room code plate: the one thing people read aloud ------------- */
-
-.plate {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--step);
-  padding: calc(var(--step) * 3) calc(var(--step) * 2);
+.card {
+  margin: 4px;
+  padding: 14px 12px;
+  border: 1px dashed var(--dashed);
+  border-radius: 10px;
   background: var(--recess);
-  border: 1px solid var(--edge);
-  border-radius: var(--radius);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
+  text-align: center;
 }
 
-.plate .caption {
-  font-family: var(--display);
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
+.card .headline {
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.card .sub {
+  margin-top: 3px;
+  font-size: 11px;
   color: var(--ink-faint);
 }
 
-.plate .code {
-  font-family: var(--display);
-  font-size: 38px;
+.card .code {
+  font-family: var(--mono);
+  font-size: 26px;
   font-weight: 600;
-  letter-spacing: 0.18em;
-  /* The tracking pushes the glyphs right; pull the block back to centre. */
-  text-indent: 0.18em;
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
   color: var(--ink);
   user-select: text;
   cursor: text;
 }
 
-/* --- buttons ---------------------------------------------------------- */
-
-.button {
-  font: inherit;
-  font-size: 13px;
-  padding: 10px var(--step);
-  color: var(--ink);
-  background: var(--panel-raised);
-  border: 1px solid var(--edge);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: border-color 120ms ease;
+.meter {
+  height: 5px;
+  margin-top: 10px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
 }
 
-.button:hover {
-  border-color: var(--edge-bright);
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 300ms ease;
 }
 
-.button:focus-visible {
-  outline: 2px solid var(--watch);
-  outline-offset: 2px;
-}
+/* --- menu rows -------------------------------------------------------- */
 
-.button[data-variant="danger"] {
-  color: var(--fault);
-  border-color: rgba(229, 72, 77, 0.4);
-}
-
-.button[data-variant="primary"] {
-  background: var(--watch);
-  border-color: var(--watch);
-  color: #05202e;
-  font-weight: 600;
-}
-
-.button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.button-row {
+.rows {
   display: flex;
-  gap: var(--step);
+  flex-direction: column;
+  padding: 2px;
 }
 
-.button-row > * {
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.row:hover:not(:disabled) {
+  background: var(--row-hover);
+}
+
+.row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.row:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.row > svg {
+  flex: none;
+  color: var(--ink-dim);
+}
+
+.row .label {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .shortcut {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+}
+
+.row[data-tone="danger"] {
+  color: var(--fault);
+}
+
+.row[data-tone="danger"] > svg {
+  color: var(--fault);
+}
+
+/* A row that is text only, like About or Check for updates. */
+.row[data-plain="true"] {
+  padding-left: 8px;
+}
+
+.divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--hairline);
 }
 
 /* --- readouts --------------------------------------------------------- */
 
 .readout {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: baseline;
-  font-family: var(--display);
-  font-size: 12px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--edge);
+  padding: 5px 10px;
+  font-size: 11.5px;
 }
 
 .readout .key {
   color: var(--ink-faint);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-size: 10px;
 }
 
 .readout .value {
+  font-family: var(--mono);
   color: var(--ink);
 }
 
@@ -326,68 +292,83 @@ body {
   color: var(--fault);
 }
 
-/* --- log -------------------------------------------------------------- */
+/* --- notices ---------------------------------------------------------- */
+
+.notice {
+  margin: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  background: rgba(242, 85, 90, 0.11);
+  border: 1px solid rgba(242, 85, 90, 0.26);
+  color: #ffb9bb;
+}
+
+.notice[data-tone="warn"] {
+  background: rgba(245, 165, 36, 0.11);
+  border-color: rgba(245, 165, 36, 0.26);
+  color: #ffd9a3;
+}
+
+/* --- misc ------------------------------------------------------------- */
+
+.grow {
+  flex: 1;
+  min-height: 0;
+}
 
 .log {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  margin: 0;
-  padding: var(--step);
+  margin: 4px;
+  padding: 8px;
   background: var(--recess);
-  border: 1px solid var(--edge);
+  border: 1px solid var(--panel-edge);
   border-radius: 8px;
-  font-family: var(--display);
-  font-size: 11px;
-  line-height: 1.6;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
   color: var(--ink-dim);
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text;
 }
 
-/* --- footer ----------------------------------------------------------- */
-
-.footer {
-  display: flex;
-  align-items: center;
-  gap: var(--step);
-  padding-top: var(--step);
-  border-top: 1px solid var(--edge);
+.log::-webkit-scrollbar {
+  width: 8px;
 }
 
-.link {
-  font: inherit;
-  font-size: 12px;
-  color: var(--ink-faint);
-  background: none;
-  border: 0;
-  padding: 4px;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+.log::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
 }
 
-.link:hover {
-  color: var(--ink-dim);
-}
-
-.link:focus-visible {
-  outline: 2px solid var(--watch);
-  outline-offset: 2px;
-}
-
-.notice {
-  padding: var(--step) calc(var(--step) * 1.5);
+.video {
+  width: 100%;
+  margin: 4px 0;
   border-radius: 8px;
-  font-size: 12px;
-  background: rgba(229, 72, 77, 0.1);
-  border: 1px solid rgba(229, 72, 77, 0.3);
-  color: #ffb4b6;
+  background: #000;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
 }
 
-.notice[data-tone="warn"] {
-  background: rgba(245, 165, 36, 0.1);
-  border-color: rgba(245, 165, 36, 0.3);
-  color: #ffd79a;
+.code-input {
+  width: 100%;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+  text-align: center;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.code-input::placeholder {
+  color: var(--ink-faint);
 }

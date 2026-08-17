@@ -5,6 +5,8 @@ use tauri::{
     App, AppHandle, Emitter, Manager, Runtime,
 };
 
+use crate::popover;
+
 /// What the tray icon is currently telling the user.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -30,17 +32,15 @@ pub const TRAY_ID: &str = "main";
 /// Frontend listens for this and routes the click to the right screen.
 pub const TRAY_ACTION_EVENT: &str = "tray://action";
 
-pub fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Menu<R>> {
-    let open = MenuItemBuilder::with_id("open", "Open").build(app)?;
-    let share = MenuItemBuilder::with_id("share", "Share Screen").build(app)?;
-    let watch = MenuItemBuilder::with_id("watch", "Watch Stream").build(app)?;
-    let stop = MenuItemBuilder::with_id("stop", "Stop Sharing")
-        .enabled(false)
-        .build(app)?;
+/// The right-click menu stays deliberately thin. The panel itself is the
+/// interface now, so this only holds what you would want without opening it.
+fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Menu<R>> {
+    let open = MenuItemBuilder::with_id("open", "Open ScreenShare").build(app)?;
+    let stop = MenuItemBuilder::with_id("stop", "Stop sharing").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
 
     MenuBuilder::new(app)
-        .items(&[&open, &share, &watch])
+        .items(&[&open])
         .separator()
         .items(&[&stop])
         .separator()
@@ -55,30 +55,46 @@ pub fn init<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
         .icon(Image::from_bytes(TrayStatus::Idle.icon_bytes())?)
         .tooltip("ScreenShare — idle")
         .menu(&menu)
-        // Left click reopens the window; the menu handles everything else.
+        // Left click opens the panel; the menu is on right click, which is
+        // what a tray popover is expected to do.
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
+                rect,
                 ..
             } = event
             {
-                show_main_window(tray.app_handle());
+                let app = tray.app_handle();
+                if let Some(window) = popover::main_window(app) {
+                    let position = rect.position.to_physical::<f64>(1.0);
+                    let size = rect.size.to_physical::<f64>(1.0);
+                    popover::toggle(
+                        &window,
+                        Some((
+                            position.x,
+                            position.y,
+                            position.x + size.width,
+                            position.y + size.height,
+                        )),
+                    );
+                }
             }
         })
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
             match id {
-                "quit" => {
-                    // The only path that actually terminates the process.
-                    app.exit(0);
+                "quit" => app.exit(0),
+                "open" => {
+                    if let Some(window) = popover::main_window(app) {
+                        popover::show(&window, None);
+                    }
                 }
-                "open" => show_main_window(app),
-                // The frontend owns capture and peer connections, so tray
-                // clicks are forwarded rather than acted on here.
-                "share" | "watch" | "stop" => {
-                    show_main_window(app);
+                "stop" => {
+                    if let Some(window) = popover::main_window(app) {
+                        popover::show(&window, None);
+                    }
                     let _ = app.emit(TRAY_ACTION_EVENT, id.to_string());
                 }
                 _ => {}
@@ -90,15 +106,13 @@ pub fn init<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
 }
 
 pub fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
+    if let Some(window) = popover::main_window(app) {
+        popover::show(&window, None);
     }
 }
 
-/// Reflects app state on the tray: icon colour plus the tooltip text that
-/// tells the user what is happening while the window is hidden.
+/// Reflects app state on the tray: icon colour plus the tooltip that tells the
+/// user what is happening while the panel is closed.
 pub fn apply_status<R: Runtime>(
     app: &AppHandle<R>,
     status: TrayStatus,

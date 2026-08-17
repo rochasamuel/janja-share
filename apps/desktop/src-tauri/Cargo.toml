@@ -13,6 +13,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[target.'cfg(windows)'.dependencies]
+# Native acrylic/mica blur. A CSS backdrop-filter cannot frost what is behind
+# the window, only what is inside it.
+window-vibrancy = "0.6"
+
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2"

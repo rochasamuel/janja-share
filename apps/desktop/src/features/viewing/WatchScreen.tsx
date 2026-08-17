@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ROOM_ID_LENGTH } from "@janja/signaling-protocol";
+import { Row } from "../../components/Row.js";
 import { config } from "../../config.js";
+import { setAutoHide } from "../../services/panel.js";
 import { createPeerConnection } from "../../services/webrtc/peer-connection.js";
 import { setTrayStatus } from "../../services/tray-status.js";
 import type { SignalingClient } from "../../services/signaling/signaling-client.js";
-import { ROOM_ID_LENGTH } from "@janja/signaling-protocol";
 import { ViewingManager, type ViewingSnapshot } from "./viewing-manager.js";
 
 interface Props {
@@ -22,21 +24,21 @@ export function WatchScreen({ signaling, onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const managerRef = useRef<ViewingManager | null>(null);
   const [code, setCode] = useState("");
+  const [muted, setMuted] = useState(false);
   const [snapshot, setSnapshot] = useState<ViewingSnapshot>({
     state: "idle",
     roomId: null,
     quality: "reconnecting",
     message: null,
   });
-  const [muted, setMuted] = useState(false);
 
   if (managerRef.current === null) {
     managerRef.current = new ViewingManager({
       signaling,
       createPeerConnection,
       onChange: setSnapshot,
-      // Straight to the element. No canvas, no frame copying — that is what
-      // keeps WebView2's hardware decoding path intact.
+      // Straight to the element: no canvas, no frame copying, which is what
+      // keeps WebView2's hardware decode path intact.
       onStream: (stream) => {
         if (videoRef.current) videoRef.current.srcObject = stream;
       },
@@ -54,11 +56,16 @@ export function WatchScreen({ signaling, onBack }: Props) {
     return () => {
       clearInterval(timer);
       manager.leave();
+      void setAutoHide(true);
       void setTrayStatus("idle");
     };
   }, []);
 
+  // While watching, a click elsewhere must not close the panel and kill the
+  // picture the user is looking at.
   useEffect(() => {
+    const watching = snapshot.state === "connected" || snapshot.state === "reconnecting";
+    void setAutoHide(!watching);
     if (snapshot.state === "connected") {
       void setTrayStatus("watching", snapshot.roomId ?? undefined);
     }
@@ -80,114 +87,78 @@ export function WatchScreen({ signaling, onBack }: Props) {
 
   if (!watching && snapshot.state !== "connecting") {
     return (
-      <div className="screen">
-        <div>
-          <h1 className="screen-title">Watch a stream</h1>
-          <p className="screen-lede">Type the code the person sharing gave you.</p>
-        </div>
-
-        <div className="plate">
-          <span className="caption">Room code</span>
+      <>
+        <div className="card">
+          <div className="sub">Room code</div>
           <input
-            className="code"
+            className="code-input"
             value={code}
-            onChange={(event) => setCode(event.target.value.toUpperCase().slice(0, ROOM_ID_LENGTH))}
+            onChange={(event) =>
+              setCode(event.target.value.toUpperCase().slice(0, ROOM_ID_LENGTH))
+            }
             onKeyDown={(event) => {
               if (event.key === "Enter" && ready) join();
             }}
-            placeholder="——————"
+            placeholder="––––––"
             spellCheck={false}
             autoFocus
-            style={{
-              background: "transparent",
-              border: 0,
-              outline: 0,
-              textAlign: "center",
-              width: "100%",
-              font: "inherit",
-              color: "inherit",
-            }}
           />
         </div>
 
         {snapshot.message ? <div className="notice">{snapshot.message}</div> : null}
 
         <div className="grow" />
+        <div className="divider" />
 
-        <button className="button" data-variant="primary" disabled={!ready} onClick={join}>
-          Watch
-        </button>
-
-        <div className="footer">
-          <button className="link" onClick={onBack}>
-            Back
-          </button>
+        <div className="rows">
+          <Row icon="watch" label="Watch" shortcut="Enter" disabled={!ready} onClick={join} />
+          <Row icon="back" label="Back" shortcut="Esc" onClick={onBack} />
         </div>
-      </div>
+      </>
     );
   }
 
   return (
-    <div className="screen">
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted={muted}
-        onDoubleClick={toggleFullscreen}
-        style={{
-          width: "100%",
-          borderRadius: 8,
-          background: "#000",
-          aspectRatio: "16 / 9",
-          objectFit: "contain",
-        }}
-      />
+    <>
+      <video ref={videoRef} className="video" autoPlay playsInline muted={muted} onDoubleClick={toggleFullscreen} />
 
-      <div className="stack">
-        <div className="readout">
-          <span className="key">Room</span>
-          <span className="value">{snapshot.roomId}</span>
-        </div>
-        <div className="readout">
-          <span className="key">Connection</span>
-          <span
-            className="value"
-            data-tone={
-              snapshot.quality === "poor" || snapshot.quality === "reconnecting"
-                ? "fault"
-                : "ok"
-            }
-          >
-            {snapshot.state === "connecting"
-              ? "Connecting"
-              : QUALITY_LABEL[snapshot.quality]}
-          </span>
-        </div>
+      <div className="readout">
+        <span className="key">Room</span>
+        <span className="value">{snapshot.roomId}</span>
+      </div>
+      <div className="readout">
+        <span className="key">Connection</span>
+        <span
+          className="value"
+          data-tone={
+            snapshot.quality === "poor" || snapshot.quality === "reconnecting" ? "fault" : "ok"
+          }
+        >
+          {snapshot.state === "connecting" ? "Connecting" : QUALITY_LABEL[snapshot.quality]}
+        </span>
       </div>
 
       <div className="grow" />
+      <div className="divider" />
 
-      <div className="button-row">
-        <button className="button" onClick={toggleFullscreen}>
-          Fullscreen
-        </button>
-        <button className="button" onClick={() => setMuted((value) => !value)}>
-          {muted ? "Unmute" : "Mute"}
-        </button>
-      </div>
-
-      <div className="footer">
-        <button
-          className="link"
+      <div className="rows">
+        <Row icon="expand" label="Fullscreen" shortcut="F" onClick={toggleFullscreen} />
+        <Row
+          icon={muted ? "mute" : "volume"}
+          label={muted ? "Unmute" : "Mute"}
+          shortcut="M"
+          onClick={() => setMuted((value) => !value)}
+        />
+        <Row
+          icon="back"
+          label="Leave"
+          shortcut="Esc"
           onClick={() => {
             managerRef.current?.leave();
             onBack();
           }}
-        >
-          Leave
-        </button>
+        />
       </div>
-    </div>
+    </>
   );
 }

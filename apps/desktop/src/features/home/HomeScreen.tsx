@@ -1,29 +1,68 @@
+import { Row } from "../../components/Row.js";
+import { quitApp } from "../../services/panel.js";
+
 interface Props {
   onShare: () => void;
   onWatch: () => void;
   onDiagnostics: () => void;
+  sharing: boolean;
+  viewerCount: number;
+  roomId: string | null;
+  onStopSharing: () => void;
 }
 
-export function HomeScreen({ onShare, onWatch, onDiagnostics }: Props) {
+export function HomeScreen({
+  onShare,
+  onWatch,
+  onDiagnostics,
+  sharing,
+  viewerCount,
+  roomId,
+  onStopSharing,
+}: Props) {
   return (
-    <div className="screen">
-      <div className="grow stack" style={{ justifyContent: "center" }}>
-        <button className="switch" onClick={onShare}>
-          <span className="label">Share my screen</span>
-          <span className="hint">Up to 6 people can watch</span>
-        </button>
-
-        <button className="switch" onClick={onWatch}>
-          <span className="label">Watch a stream</span>
-          <span className="hint">You'll need a room code</span>
-        </button>
+    <>
+      <div className="card">
+        {sharing ? (
+          <>
+            <div className="headline">Sharing to {viewerCount} of 6</div>
+            <div className="code">{roomId}</div>
+          </>
+        ) : (
+          <>
+            <div className="headline">Nothing is being shared</div>
+            <div className="sub">Start a room, or join one with a code</div>
+          </>
+        )}
       </div>
 
-      <div className="footer">
-        <button className="link" onClick={onDiagnostics}>
-          Capture check
-        </button>
+      <div className="rows">
+        <Row icon="share" label="Share my screen" shortcut="Ctrl S" onClick={onShare} />
+        <Row icon="watch" label="Watch a stream" shortcut="Ctrl W" onClick={onWatch} />
+        {sharing ? (
+          <Row
+            icon="stop"
+            label="Stop sharing"
+            shortcut="Ctrl ."
+            tone="danger"
+            onClick={onStopSharing}
+          />
+        ) : null}
       </div>
-    </div>
+
+      <div className="divider" />
+
+      <div className="rows">
+        <Row icon="pulse" label="Capture check" shortcut="Ctrl D" onClick={onDiagnostics} />
+      </div>
+
+      <div className="grow" />
+
+      <div className="divider" />
+
+      <div className="rows">
+        <Row icon="quit" label="Quit" shortcut="Ctrl Q" onClick={() => void quitApp()} />
+      </div>
+    </>
   );
 }
