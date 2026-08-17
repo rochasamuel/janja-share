@@ -1,4 +1,4 @@
-use tauri::{LogicalPosition, Manager, PhysicalPosition, Runtime, WebviewWindow};
+use tauri::{LogicalPosition, LogicalSize, Manager, PhysicalPosition, Runtime, WebviewWindow};
 
 /// Gap between the panel and the tray icon, in physical pixels at 100% scale.
 const GAP: f64 = 12.0;
@@ -83,6 +83,47 @@ pub fn show<R: Runtime>(window: &WebviewWindow<R>, tray_rect: Option<(f64, f64, 
     position_near_tray(window, tray_rect);
     let _ = window.show();
     let _ = window.set_focus();
+}
+
+/// Where the panel sat before it grew for the picker.
+pub type SavedGeometry = (tauri::PhysicalPosition<i32>, tauri::PhysicalSize<u32>);
+
+/// How big the window has to be for Chromium's source picker to fit.
+///
+/// The picker is drawn *inside* the webview, not as a system dialog, so a
+/// 320-wide popover clips it. Growing the window for the duration is the only
+/// lever we have: WebView2 exposes no way to restyle or reposition it.
+const PICKER_SIZE: (f64, f64) = (880.0, 660.0);
+
+/// Grows and centres the window so the picker fits, returning where it was.
+pub fn enter_picker_mode<R: Runtime>(window: &WebviewWindow<R>) -> Option<SavedGeometry> {
+    let saved = match (window.outer_position(), window.outer_size()) {
+        (Ok(position), Ok(size)) => Some((position, size)),
+        _ => None,
+    };
+
+    let _ = window.set_size(LogicalSize::new(PICKER_SIZE.0, PICKER_SIZE.1));
+    let _ = window.center();
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    saved
+}
+
+/// Puts the panel back exactly where it was.
+pub fn leave_picker_mode<R: Runtime>(window: &WebviewWindow<R>, saved: Option<SavedGeometry>) {
+    match saved {
+        Some((position, size)) => {
+            let _ = window.set_size(size);
+            let _ = window.set_position(position);
+        }
+        None => {
+            // Nothing recorded: fall back to the tray corner rather than
+            // leaving a 880px panel floating in the middle of the screen.
+            let _ = window.set_size(LogicalSize::new(320.0, 440.0));
+            position_near_tray(window, None);
+        }
+    }
 }
 
 /// Kept so a future settings window can reuse the logical helper.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Row } from "../../components/Row.js";
-import { setAutoHide } from "../../services/panel.js";
+import { setAutoHide, setPickerMode } from "../../services/panel.js";
 import { probeCapture, summarize, type ProbeResult } from "./capture-probe.js";
 
 interface Props {
@@ -29,8 +29,9 @@ export function DiagnosticsScreen({ onBack }: Props) {
     setBusy(true);
     setLog(`Requesting capture — choose ${source === "screen" ? "a whole screen" : "a window"}…`);
 
-    // The picker takes focus; without this the panel would hide mid-check.
-    await setAutoHide(false);
+    // The picker renders inside the webview and takes focus, so the window
+    // has to make room for it and stop hiding on blur.
+    await setPickerMode(true);
     try {
       const result = await probeCapture();
       setLastResult(result);
@@ -43,7 +44,7 @@ export function DiagnosticsScreen({ onBack }: Props) {
         ].join("\n"),
       );
     } finally {
-      await setAutoHide(true);
+      await setPickerMode(false);
       setBusy(false);
     }
   }, []);

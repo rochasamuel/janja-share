@@ -372,3 +372,36 @@ body {
 .code-input::placeholder {
   color: var(--ink-faint);
 }
+
+/* --- picker mode ------------------------------------------------------ */
+
+/* Chromium paints its source picker over the webview. This is the frame that
+   shows around it, so the moment reads as part of the app rather than a
+   browser interrupting. */
+.picking {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1;
+  min-height: 0;
+  padding: 24px;
+  text-align: center;
+  gap: 6px;
+}
+
+.picking-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.picking-hint {
+  font-size: 12px;
+  color: var(--ink-dim);
+  max-width: 380px;
+}
+
+.picking-hint strong {
+  color: var(--ink);
+  font-weight: 600;
+}

@@ -18,6 +18,10 @@ use tray::TrayStatus;
 /// the user tries to start sharing, and the session would look broken.
 struct AutoHide(AtomicBool);
 
+/// Where the panel was before it grew to fit the picker.
+#[derive(Default)]
+struct PanelGeometry(Mutex<Option<popover::SavedGeometry>>);
+
 /// Lets the frontend drive the tray as its own state changes.
 #[tauri::command]
 fn set_tray_status(
@@ -33,6 +37,32 @@ fn set_tray_status(
 #[tauri::command]
 fn set_auto_hide(state: tauri::State<'_, AutoHide>, enabled: bool) {
     state.0.store(enabled, Ordering::Relaxed);
+}
+
+/// Grows the panel while Chromium's source picker is on screen.
+///
+/// The picker renders inside the webview rather than as a system dialog, so at
+/// the panel's normal 320px it is cut off. This is the only lever available:
+/// WebView2 offers no way to restyle, resize or reposition that UI.
+#[tauri::command]
+fn set_picker_mode(
+    window: tauri::WebviewWindow,
+    geometry: State<'_, PanelGeometry>,
+    auto_hide: State<'_, AutoHide>,
+    enabled: bool,
+) {
+    // The picker takes focus; hiding on blur now would kill it mid-choice.
+    auto_hide.0.store(!enabled, Ordering::Relaxed);
+
+    if enabled {
+        let saved = popover::enter_picker_mode(&window);
+        if let Ok(mut slot) = geometry.0.lock() {
+            *slot = saved;
+        }
+    } else {
+        let saved = geometry.0.lock().ok().and_then(|mut slot| slot.take());
+        popover::leave_picker_mode(&window, saved);
+    }
 }
 
 #[tauri::command]
@@ -140,9 +170,11 @@ pub fn run() {
     builder
         .manage(AutoHide(AtomicBool::new(true)))
         .manage(AudioCapture::default())
+        .manage(PanelGeometry::default())
         .invoke_handler(tauri::generate_handler![
             set_tray_status,
             set_auto_hide,
+            set_picker_mode,
             hide_panel,
             describe_window,
             start_app_audio,

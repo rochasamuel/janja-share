@@ -26,6 +26,17 @@ export function setAutoHide(enabled: boolean): Promise<void> {
   return invokeSafely("set_auto_hide", { enabled });
 }
 
+/**
+ * Grows the panel so Chromium's source picker fits, and shrinks it back after.
+ *
+ * The picker is drawn inside the webview rather than as a system dialog, so at
+ * the popover's normal width it gets clipped. WebView2 gives no way to restyle
+ * or move that UI, so making room for it is the whole fix.
+ */
+export function setPickerMode(enabled: boolean): Promise<void> {
+  return invokeSafely("set_picker_mode", { enabled });
+}
+
 export function hidePanel(): Promise<void> {
   return invokeSafely("hide_panel");
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Row } from "../../components/Row.js";
-import { setAutoHide } from "../../services/panel.js";
+import { setAutoHide, setPickerMode } from "../../services/panel.js";
 import type { SharingSnapshot } from "./sharing-manager.js";
 
 interface Props {
@@ -20,18 +20,40 @@ export function ShareScreen({ snapshot, onStart, onStop, onBack }: Props) {
     });
   }, []);
 
+  const [picking, setPicking] = useState(false);
+
   const start = useCallback(async () => {
-    // The Windows picker steals focus, and a popover that hides on blur would
-    // vanish mid-flow. Pin it open until the picker is done.
-    await setAutoHide(false);
+    // Grow the window first: the picker renders inside the webview, so it has
+    // to have somewhere to render before it opens. set_picker_mode also pins
+    // the panel open, since the picker steals focus.
+    setPicking(true);
+    await setPickerMode(true);
     try {
       await onStart();
     } finally {
-      await setAutoHide(true);
+      await setPickerMode(false);
+      setPicking(false);
     }
   }, [onStart]);
 
-  useEffect(() => () => void setAutoHide(true), []);
+  useEffect(() => () => {
+    void setPickerMode(false);
+    void setAutoHide(true);
+  }, []);
+
+  if (picking) {
+    // The picker paints over this. What shows around it is our own frame, so
+    // the moment reads as part of the app rather than a browser interrupting.
+    return (
+      <div className="picking">
+        <div className="picking-title">Choose what to share</div>
+        <div className="picking-hint">
+          Pick a window or a screen above, and turn on <strong>Share audio</strong>{" "}
+          before you confirm.
+        </div>
+      </div>
+    );
+  }
 
   if (snapshot.state !== "sharing") {
     return (
