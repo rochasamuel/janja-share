@@ -30,7 +30,6 @@
       "csp": "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: http: https:"
     }
   },
-  "//": "No trayIcon block here on purpose: the tray is built in src/tray.rs, which owns the menu, the click-to-toggle and the status icons. Declaring it in both places creates two icons, and the config one has no handlers.",
   "bundle": {
     "active": true,
     "targets": ["nsis", "msi"],

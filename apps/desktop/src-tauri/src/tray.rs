@@ -28,6 +28,11 @@ impl TrayStatus {
     }
 }
 
+/// The tray lives here and only here.
+///
+/// `tauri.conf.json` deliberately has no `trayIcon` block: declaring it there
+/// as well makes Tauri create a second icon at startup, one with no menu and
+/// no click handler, so half the user's clicks land on a dead icon.
 pub const TRAY_ID: &str = "main";
 /// Frontend listens for this and routes the click to the right screen.
 pub const TRAY_ACTION_EVENT: &str = "tray://action";
