@@ -1,4 +1,4 @@
-import type { IceServer, ServerMessage } from "@janja/signaling-protocol";
+import type { IceCandidateInit, IceServer, ServerMessage } from "@janja/signaling-protocol";
 import type { SignalingClient } from "../../services/signaling/signaling-client.js";
 import {
   classifyQuality,
@@ -190,7 +190,7 @@ export class ViewingManager {
         this.#options.signaling.send({
           type: "ice-candidate",
           targetId: this.#sharerId,
-          candidate: event.candidate.toJSON() as RTCIceCandidateInit,
+          candidate: event.candidate.toJSON() as IceCandidateInit,
         });
       } catch {
         // Reconnection logic owns the socket; a lost candidate is survivable.

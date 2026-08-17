@@ -38,10 +38,12 @@ function makeStream(tracks: ReturnType<typeof makeTrack>[]) {
 
 describe("startCapture", () => {
   it("asks for 1080p60 as a preference rather than a requirement", async () => {
-    const getDisplayMedia = vi.fn(async () => makeStream([makeTrack("video")]));
+    const getDisplayMedia = vi.fn(async (_constraints: DisplayMediaStreamOptions) =>
+      makeStream([makeTrack("video")]),
+    );
     await startCapture({ getDisplayMedia });
 
-    const constraints = getDisplayMedia.mock.calls[0]![0] as Record<string, any>;
+    const constraints = getDisplayMedia.mock.calls[0]![0] as unknown as Record<string, any>;
     expect(constraints["video"].width).toEqual({ ideal: 1920 });
     expect(constraints["video"].frameRate).toEqual({ ideal: 60 });
     // `exact` would fail outright on a monitor that cannot match it.
@@ -49,10 +51,12 @@ describe("startCapture", () => {
   });
 
   it("asks the picker to offer system sound", async () => {
-    const getDisplayMedia = vi.fn(async () => makeStream([makeTrack("video")]));
+    const getDisplayMedia = vi.fn(async (_constraints: DisplayMediaStreamOptions) =>
+      makeStream([makeTrack("video")]),
+    );
     await startCapture({ getDisplayMedia });
 
-    const constraints = getDisplayMedia.mock.calls[0]![0] as Record<string, unknown>;
+    const constraints = getDisplayMedia.mock.calls[0]![0] as unknown as Record<string, unknown>;
     expect(constraints["audio"]).toBe(true);
     expect(constraints["systemAudio"]).toBe("include");
   });
