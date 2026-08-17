@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { probeCapture, summarize } from "./capture-probe.js";
+import { detectEngine, probeCapture, summarize } from "./capture-probe.js";
 
 function track(kind: "video" | "audio", label: string, settings: Record<string, unknown> = {}) {
   let stopped = false;
@@ -111,5 +111,47 @@ describe("probeCapture", () => {
   it("calls out missing system audio in the summary", async () => {
     const result = await probeCapture(deps(async () => stream([track("video", "Window")])));
     expect(summarize(result)).toContain("no system audio");
+  });
+});
+
+describe("engine detection", () => {
+  it("recognises the WebView2 host we actually ship on", () => {
+    const ua =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0";
+    expect(detectEngine(ua)).toBe("webview2");
+  });
+
+  it("recognises the browsers that cannot answer the question", () => {
+    expect(
+      detectEngine("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0"),
+    ).toBe("firefox");
+    expect(
+      detectEngine("Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"),
+    ).toBe("chrome");
+  });
+
+  it("marks a probe run outside WebView2 as untrustworthy", async () => {
+    const result = await probeCapture({
+      getDisplayMedia: async () => stream([track("video", "Primary Monitor")]),
+      getVideoCodecs: () => ["video/H264"],
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; rv:153.0) Gecko/20100101 Firefox/153.0",
+    });
+
+    expect(result.engine).toBe("firefox");
+    expect(result.trustworthy).toBe(false);
+    // Firefox reports zero audio tracks regardless of what Windows can do, so
+    // the summary must not let that read as a finding.
+    expect(summarize(result)).toContain("do not answer anything");
+  });
+
+  it("treats a WebView2 run as trustworthy", async () => {
+    const result = await probeCapture({
+      getDisplayMedia: async () => stream([track("video", "Primary Monitor"), track("audio", "System Audio")]),
+      getVideoCodecs: () => ["video/H264"],
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0",
+    });
+
+    expect(result.trustworthy).toBe(true);
+    expect(summarize(result)).toContain("WebView2 (correct host)");
   });
 });

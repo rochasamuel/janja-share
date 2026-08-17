@@ -60,6 +60,14 @@ export function DiagnosticsScreen({ onBack }: Props) {
         </button>
       </div>
 
+      {lastResult && !lastResult.trustworthy ? (
+        <div className="notice">
+          This is a browser tab, not the app. Firefox and Chrome answer this
+          question differently from the engine we ship on, so these numbers
+          mean nothing. Run the check from the ScreenShare window.
+        </div>
+      ) : null}
+
       {lastResult?.ok === false && lastResult.permissionLikelyDenied ? (
         <div className="notice">
           Windows never showed a picker. The app itself is being refused screen
@@ -67,7 +75,7 @@ export function DiagnosticsScreen({ onBack }: Props) {
         </div>
       ) : null}
 
-      {lastResult?.ok === true && !lastResult.hasSystemAudio ? (
+      {lastResult?.ok === true && lastResult.trustworthy && !lastResult.hasSystemAudio ? (
         <div className="notice" data-tone="warn">
           Video works, but this source gives no sound. Picking a whole screen
           instead of a single window usually fixes it.

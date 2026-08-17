@@ -14,11 +14,32 @@ export interface TrackReport {
   settings: Record<string, unknown>;
 }
 
+/**
+ * Which browser engine is actually running this code.
+ *
+ * This matters more than it looks. Firefox has never implemented audio in
+ * getDisplayMedia on any platform, so probing there reports "no system audio"
+ * no matter what Windows can do — a result that looks like an answer and is
+ * not one. Only the engine we ship on can answer the question.
+ */
+export type Engine = "webview2" | "chrome" | "firefox" | "webkit" | "unknown";
+
+export function detectEngine(userAgent: string): Engine {
+  if (/Edg\//.test(userAgent)) return "webview2";
+  if (/Firefox\//.test(userAgent)) return "firefox";
+  if (/Chrome\//.test(userAgent)) return "chrome";
+  if (/AppleWebKit/.test(userAgent)) return "webkit";
+  return "unknown";
+}
+
 export interface ProbeResult {
   ok: boolean;
   /** Set when the probe failed outright. */
   errorName?: string;
   errorMessage?: string;
+  engine: Engine;
+  /** False when this run cannot answer the question it was built to answer. */
+  trustworthy: boolean;
   /** True when the failure looks like the host never granted DisplayCapture. */
   permissionLikelyDenied?: boolean;
   video: TrackReport[];
@@ -54,7 +75,14 @@ export async function probeCapture(deps: ProbeDeps = {}): Promise<ProbeResult> {
   const getVideoCodecs = deps.getVideoCodecs ?? defaultCodecs;
   const userAgent = deps.userAgent ?? navigator.userAgent;
 
+  const engine = detectEngine(userAgent);
+  // WebView2 is the only host we ship on; anything else is measuring a
+  // different product.
+  const trustworthy = engine === "webview2";
+
   const empty = {
+    engine,
+    trustworthy,
     video: [],
     audio: [],
     width: null,
@@ -91,6 +119,8 @@ export async function probeCapture(deps: ProbeDeps = {}): Promise<ProbeResult> {
 
   const result: ProbeResult = {
     ok: true,
+    engine,
+    trustworthy,
     video: videoTracks.map(describe),
     audio: audioTracks.map(describe),
     width: primary?.width ?? null,
@@ -114,10 +144,28 @@ function describe(track: MediaStreamTrack): TrackReport {
   };
 }
 
+const ENGINE_LABEL: Record<Engine, string> = {
+  webview2: "WebView2 (correct host)",
+  chrome: "Chrome — NOT the app",
+  firefox: "Firefox — NOT the app",
+  webkit: "WebKit — NOT the app",
+  unknown: "unknown — NOT the app",
+};
+
 /** Human-readable summary for the diagnostics log and for RESULTS.md. */
 export function summarize(result: ProbeResult): string {
+  const header = result.trustworthy
+    ? `engine:            ${ENGINE_LABEL[result.engine]}`
+    : [
+        `!! ENGINE:         ${ENGINE_LABEL[result.engine]}`,
+        `!! These numbers do not answer anything. Run the check inside the`,
+        `!! ScreenShare window, not in a browser tab.`,
+      ].join("\n");
+
   if (!result.ok) {
     const lines = [
+      header,
+      ``,
       `FAILED: ${result.errorName}: ${result.errorMessage}`,
       result.permissionLikelyDenied
         ? "Looks like the host never granted DisplayCapture, rather than you pressing cancel."
@@ -127,6 +175,8 @@ export function summarize(result: ProbeResult): string {
   }
 
   return [
+    header,
+    ``,
     `picker shown:      yes`,
     `video tracks:      ${result.video.length}`,
     `audio tracks:      ${result.audio.length}${result.hasSystemAudio ? "" : "  <-- no system audio"}`,
