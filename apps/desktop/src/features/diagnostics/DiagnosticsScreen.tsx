@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Row } from "../../components/Row.js";
 import { setAutoHide, setPickerMode } from "../../services/panel.js";
 import { probeCapture, summarize, type ProbeResult } from "./capture-probe.js";
+import { listSources, summarizeNamedSource, tryNamedSource } from "./named-source.js";
 
 interface Props {
   onBack: () => void;
@@ -49,6 +50,27 @@ export function DiagnosticsScreen({ onBack }: Props) {
     }
   }, []);
 
+  /**
+   * Answers whether a custom picker is possible at all: can this webview
+   * capture a source we choose, with no picker of its own?
+   */
+  const checkNamedSource = useCallback(async () => {
+    setBusy(true);
+    setLog("Listing windows and trying to capture one directly…");
+
+    const sources = await listSources();
+    const target = sources.find((source) => source.kind === "window") ?? sources[0];
+    if (!target) {
+      setLog("No capture sources found. This needs the desktop app.");
+      setBusy(false);
+      return;
+    }
+
+    const result = await tryNamedSource(target.id);
+    setLog(summarizeNamedSource(result, sources));
+    setBusy(false);
+  }, []);
+
   const copy = useCallback(() => {
     void navigator.clipboard.writeText(log);
   }, [log]);
@@ -83,6 +105,12 @@ export function DiagnosticsScreen({ onBack }: Props) {
       <div className="rows">
         <Row icon="pulse" label="Check a screen" disabled={busy} onClick={() => void run("screen")} />
         <Row icon="pulse" label="Check a window" disabled={busy} onClick={() => void run("window")} />
+        <Row
+          icon="share"
+          label="Test custom picker"
+          disabled={busy}
+          onClick={() => void checkNamedSource()}
+        />
         <Row icon="copy" label="Copy results" onClick={copy} />
         <Row icon="back" label="Back" shortcut="Esc" onClick={onBack} />
       </div>

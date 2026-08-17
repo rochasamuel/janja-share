@@ -1,6 +1,7 @@
 #[cfg(target_os = "windows")]
 mod app_audio;
 mod popover;
+mod sources;
 mod tray;
 mod window_info;
 
@@ -140,6 +141,15 @@ fn stop_app_audio(state: State<'_, AudioCapture>) {
     }
 }
 
+/// Lists the windows and screens a person could share.
+///
+/// Groundwork for a custom picker, and right now the input to testing whether
+/// WebView2 will accept a source we name ourselves.
+#[tauri::command]
+fn list_capture_sources() -> Vec<sources::CaptureSource> {
+    sources::list()
+}
+
 /// Reports which process owns a shared window, so the capture check can prove
 /// the label Chromium hands us really is an HWND before anything depends on it.
 #[tauri::command]
@@ -177,6 +187,7 @@ pub fn run() {
             set_picker_mode,
             hide_panel,
             describe_window,
+            list_capture_sources,
             start_app_audio,
             stop_app_audio,
             quit_app
