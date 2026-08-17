@@ -54,14 +54,18 @@ export async function createSignalingServer(
   const wss = new WebSocketServer({ server: http, maxPayload: MAX_FRAME_BYTES });
 
   function handleHttp(req: IncomingMessage, res: ServerResponse): void {
-    if (req.method === "GET" && req.url === "/api/ice-servers") {
+    // Platform health checks are split between GET and HEAD, and a 404 to a
+    // HEAD probe reads as a dead service and rolls the deploy back.
+    const isRead = req.method === "GET" || req.method === "HEAD";
+
+    if (isRead && req.url === "/api/ice-servers") {
       // A fresh session id keeps each issued credential distinct and short-lived.
       const body = JSON.stringify({ iceServers: buildIceServers(options.ice, randomUUID()) });
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       res.end(body);
       return;
     }
-    if (req.method === "GET" && req.url === "/healthz") {
+    if (isRead && req.url === "/healthz") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, rooms: rooms.roomCount }));
       return;

@@ -24,7 +24,10 @@ function integer(name: string, fallback: number): number {
 
 export function loadConfig(): AppConfig {
   const config: AppConfig = {
-    port: integer("SIGNALING_PORT", 8787),
+    // Railway, Render, Fly and Heroku all inject PORT and expect the process
+    // to obey it. Ignoring it means the platform's health check never passes
+    // and the deploy is rolled back with no useful error.
+    port: integer("PORT", integer("SIGNALING_PORT", 8787)),
     host: process.env["SIGNALING_HOST"] ?? "0.0.0.0",
     maxViewers: integer("MAX_VIEWERS", 6),
     ice: {

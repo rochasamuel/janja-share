@@ -349,6 +349,12 @@ describe("signaling server", () => {
       expect(await response.text()).not.toContain("test-secret");
     });
 
+    it("answers a HEAD health probe, not just GET", async () => {
+      // Some platforms probe with HEAD; a 404 there reads as a dead service.
+      const response = await fetch(`http://127.0.0.1:${server.port}/healthz`, { method: "HEAD" });
+      expect(response.status).toBe(200);
+    });
+
     it("404s an unknown path", async () => {
       const response = await fetch(`http://127.0.0.1:${server.port}/rooms`);
       expect(response.status).toBe(404);
