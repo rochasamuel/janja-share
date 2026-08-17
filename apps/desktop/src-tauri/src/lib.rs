@@ -1,9 +1,14 @@
+#[cfg(target_os = "windows")]
+mod app_audio;
 mod popover;
 mod tray;
+mod window_info;
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
-use tauri::{Manager, WindowEvent};
+use tauri::ipc::{Channel, InvokeResponseBody};
+use tauri::{Manager, State, WindowEvent};
 use tray::TrayStatus;
 
 /// Whether clicking away closes the panel.
@@ -35,6 +40,83 @@ fn hide_panel(window: tauri::WebviewWindow) {
     let _ = window.hide();
 }
 
+/// The running per-application audio capture, if any.
+#[cfg(target_os = "windows")]
+#[derive(Default)]
+struct AudioCapture(Mutex<Option<app_audio::CaptureHandle>>);
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AudioStarted {
+    pid: u32,
+    process: String,
+    sample_rate: u32,
+    channels: u16,
+}
+
+/// Captures only what the shared application plays, and streams it to the
+/// frontend as raw f32 frames.
+///
+/// Returns an error rather than silence when the platform refuses, so the
+/// caller can fall back to system audio and say so.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn start_app_audio(
+    state: State<'_, AudioCapture>,
+    label: String,
+    channel: Channel<InvokeResponseBody>,
+) -> Result<AudioStarted, String> {
+    let window_id = window_info::parse_window_label(&label)
+        .ok_or_else(|| "that source is a whole screen, not one app".to_string())?;
+    let info = window_info::describe(window_id)
+        .ok_or_else(|| "could not tell which app owns that window".to_string())?;
+
+    // Replace any previous capture: two of them would double the audio.
+    if let Ok(mut slot) = state.0.lock() {
+        if let Some(previous) = slot.take() {
+            previous.stop();
+        }
+    }
+
+    let handle = app_audio::start(info.pid, move |samples| {
+        let mut bytes = Vec::with_capacity(samples.len() * 4);
+        for sample in samples {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        let _ = channel.send(InvokeResponseBody::Raw(bytes));
+    })?;
+
+    state
+        .0
+        .lock()
+        .map_err(|_| "audio state is poisoned".to_string())?
+        .replace(handle);
+
+    Ok(AudioStarted {
+        pid: info.pid,
+        process: info.process,
+        sample_rate: app_audio::SAMPLE_RATE,
+        channels: app_audio::CHANNELS,
+    })
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn stop_app_audio(state: State<'_, AudioCapture>) {
+    if let Ok(mut slot) = state.0.lock() {
+        if let Some(handle) = slot.take() {
+            handle.stop();
+        }
+    }
+}
+
+/// Reports which process owns a shared window, so the capture check can prove
+/// the label Chromium hands us really is an HWND before anything depends on it.
+#[tauri::command]
+fn describe_window(label: String) -> Option<window_info::WindowInfo> {
+    window_info::parse_window_label(&label).and_then(window_info::describe)
+}
+
 /// Sharing must survive the panel closing, so quitting has to be explicit.
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
@@ -57,10 +139,14 @@ pub fn run() {
 
     builder
         .manage(AutoHide(AtomicBool::new(true)))
+        .manage(AudioCapture::default())
         .invoke_handler(tauri::generate_handler![
             set_tray_status,
             set_auto_hide,
             hide_panel,
+            describe_window,
+            start_app_audio,
+            stop_app_audio,
             quit_app
         ])
         .setup(|app| {

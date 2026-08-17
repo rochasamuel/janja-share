@@ -7,10 +7,11 @@ import {
   stopCapture,
 } from "./screen-capture.js";
 
-function makeTrack(kind: "video" | "audio") {
+function makeTrack(kind: "video" | "audio", label = "") {
   const listeners = new Map<string, (() => void)[]>();
   return {
     kind,
+    label,
     contentHint: "",
     stopped: false,
     stop() {
@@ -28,11 +29,17 @@ function makeTrack(kind: "video" | "audio") {
   };
 }
 
-function makeStream(tracks: ReturnType<typeof makeTrack>[]) {
+function makeStream(initial: ReturnType<typeof makeTrack>[]) {
+  const tracks = [...initial];
   return {
     getTracks: () => tracks,
     getVideoTracks: () => tracks.filter((t) => t.kind === "video"),
     getAudioTracks: () => tracks.filter((t) => t.kind === "audio"),
+    addTrack: (track: ReturnType<typeof makeTrack>) => tracks.push(track),
+    removeTrack: (track: ReturnType<typeof makeTrack>) => {
+      const index = tracks.indexOf(track);
+      if (index >= 0) tracks.splice(index, 1);
+    },
   } as unknown as MediaStream;
 }
 
@@ -69,16 +76,25 @@ describe("startCapture", () => {
     expect(stream).toBeDefined();
   });
 
-  it("reports whether system audio came back", async () => {
+  it("falls back to system audio when per-app capture is unavailable", async () => {
     const withSound = await startCapture({
       getDisplayMedia: async () => makeStream([makeTrack("video"), makeTrack("audio")]),
+      startAppAudio: async () => {
+        throw new Error("needs windows 11");
+      },
     });
-    expect(withSound.hasSystemAudio).toBe(true);
+    expect(withSound.audioSource).toBe("system");
+    expect(withSound.audioNote).toContain("windows 11");
+  });
 
+  it("reports no audio at all when neither path works", async () => {
     const silent = await startCapture({
       getDisplayMedia: async () => makeStream([makeTrack("video")]),
+      startAppAudio: async () => {
+        throw new Error("whole screen");
+      },
     });
-    expect(silent.hasSystemAudio).toBe(false);
+    expect(silent.audioSource).toBe("none");
   });
 
   it("treats a cancelled picker as a decision, not a failure", async () => {
@@ -153,5 +169,69 @@ describe("stopCapture", () => {
 
   it("tolerates being called with nothing", () => {
     expect(() => stopCapture(undefined)).not.toThrow();
+  });
+});
+
+describe("per-application audio", () => {
+  const appTrack = () => makeTrack("audio");
+
+  it("replaces the system mix with the app's own audio", async () => {
+    const systemAudio = makeTrack("audio");
+    const perApp = appTrack();
+
+    const result = await startCapture({
+      getDisplayMedia: async () => makeStream([makeTrack("video"), systemAudio]),
+      startAppAudio: async () => ({
+        track: perApp as unknown as MediaStreamTrack,
+        process: "Discord.exe",
+        stop: async () => {},
+      }),
+    });
+
+    expect(result.audioSource).toBe("app");
+    expect(result.audioProcess).toBe("Discord.exe");
+    // The system mix has to be stopped, not merely unused: leaving it running
+    // would put the voice call back into the stream.
+    expect(systemAudio.stopped).toBe(true);
+  });
+
+  it("passes the shared window's label through so Rust can find the process", async () => {
+    let seen: string | undefined;
+    await startCapture({
+      getDisplayMedia: async () => makeStream([makeTrack("video", "window:1051672:0")]),
+      startAppAudio: async (label) => {
+        seen = label;
+        return { track: appTrack() as unknown as MediaStreamTrack, process: "x", stop: async () => {} };
+      },
+    });
+    expect(seen).toBe("window:1051672:0");
+  });
+
+  it("hands back a way to release the native capture", async () => {
+    let stopped = false;
+    const result = await startCapture({
+      getDisplayMedia: async () => makeStream([makeTrack("video")]),
+      startAppAudio: async () => ({
+        track: appTrack() as unknown as MediaStreamTrack,
+        process: "x",
+        stop: async () => {
+          stopped = true;
+        },
+      }),
+    });
+
+    await result.stopAudio?.();
+    expect(stopped).toBe(true);
+  });
+
+  it("can be told to skip per-app capture entirely", async () => {
+    const result = await startCapture({
+      getDisplayMedia: async () => makeStream([makeTrack("video"), makeTrack("audio")]),
+      preferAppAudio: false,
+      startAppAudio: async () => {
+        throw new Error("should not be called");
+      },
+    });
+    expect(result.audioSource).toBe("system");
   });
 });

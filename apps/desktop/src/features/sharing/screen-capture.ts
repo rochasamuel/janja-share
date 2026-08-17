@@ -6,10 +6,18 @@
  * path for audio, this is the only file that changes.
  */
 
+/** Where the audio in the stream came from, if any. */
+export type AudioSource = "app" | "system" | "none";
+
 export interface CaptureResult {
   stream: MediaStream;
-  /** False when Windows gave us video but no sound for the chosen source. */
-  hasSystemAudio: boolean;
+  audioSource: AudioSource;
+  /** Set when audioSource is "app": the process the sound belongs to. */
+  audioProcess?: string;
+  /** Why per-app audio was not used, when it was not. */
+  audioNote?: string;
+  /** Releases the native capture, if one is running. */
+  stopAudio?: () => Promise<void>;
 }
 
 export interface CaptureOptions {
@@ -18,6 +26,14 @@ export interface CaptureOptions {
   height?: number;
   frameRate?: number;
   getDisplayMedia?: (constraints: DisplayMediaStreamOptions) => Promise<MediaStream>;
+  /** Set false to skip native per-app capture and take the system mix. */
+  preferAppAudio?: boolean;
+  /** Injected in tests; defaults to the real native bridge. */
+  startAppAudio?: (trackLabel: string) => Promise<{
+    track: MediaStreamTrack;
+    process: string;
+    stop: () => Promise<void>;
+  }>;
 }
 
 export class CaptureCancelledError extends Error {
@@ -79,7 +95,65 @@ export async function startCapture(options: CaptureOptions = {}): Promise<Captur
   // between readable code on the other end and a blurry mess.
   videoTrack.contentHint = "detail";
 
-  return { stream, hasSystemAudio: stream.getAudioTracks().length > 0 };
+  return attachAudio(stream, videoTrack, options);
+}
+
+/**
+ * Picks the best audio available, in order: the shared app alone, then the
+ * whole computer, then none.
+ *
+ * Per-app matters because the system mix carries whatever else is playing —
+ * most painfully the voice of whoever you are on a call with, fed straight
+ * back into the stream.
+ */
+async function attachAudio(
+  stream: MediaStream,
+  videoTrack: MediaStreamTrack,
+  options: CaptureOptions,
+): Promise<CaptureResult> {
+  const systemTracks = stream.getAudioTracks();
+
+  if (options.preferAppAudio !== false) {
+    // Only the native call belongs in the try. Swallowing a later failure here
+    // would report "per-app audio unavailable" for something else entirely.
+    let appAudio: Awaited<ReturnType<NonNullable<CaptureOptions["startAppAudio"]>>> | undefined;
+    let note: string | undefined;
+
+    try {
+      const startAppAudio = options.startAppAudio ?? (await import("./app-audio.js")).startAppAudio;
+      appAudio = await startAppAudio(videoTrack.label);
+    } catch (error) {
+      note = error instanceof Error ? error.message : String(error);
+    }
+
+    if (appAudio) {
+      // Drop the system mix: keeping both would play everything twice, with
+      // the voice call still in it.
+      for (const track of systemTracks) {
+        stream.removeTrack(track);
+        track.stop();
+      }
+      stream.addTrack(appAudio.track);
+
+      return {
+        stream,
+        audioSource: "app",
+        audioProcess: appAudio.process,
+        stopAudio: appAudio.stop,
+      };
+    }
+
+    return {
+      stream,
+      audioSource: systemTracks.length > 0 ? "system" : "none",
+      ...(note === undefined ? {} : { audioNote: note }),
+    };
+  }
+
+  return {
+    stream,
+    audioSource: systemTracks.length > 0 ? "system" : "none",
+  };
 }
 
 /**

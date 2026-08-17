@@ -88,8 +88,21 @@ export function ShareScreen({ snapshot, onStart, onStop, onBack }: Props) {
       </div>
       <div className="readout">
         <span className="key">Sound</span>
-        <span className="value" data-tone={snapshot.hasSystemAudio ? "ok" : "fault"}>
-          {snapshot.hasSystemAudio ? "on" : "off"}
+        <span
+          className="value"
+          data-tone={
+            snapshot.audioSource === "app"
+              ? "ok"
+              : snapshot.audioSource === "none"
+                ? "fault"
+                : undefined
+          }
+        >
+          {snapshot.audioSource === "app"
+            ? (snapshot.audioProcess ?? "this app only")
+            : snapshot.audioSource === "system"
+              ? "whole computer"
+              : "off"}
         </span>
       </div>
 

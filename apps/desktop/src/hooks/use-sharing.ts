@@ -10,7 +10,8 @@ const EMPTY: SharingSnapshot = {
   roomId: null,
   viewerIds: [],
   maxViewers: 6,
-  hasSystemAudio: false,
+  audioSource: "none",
+  audioProcess: null,
   message: null,
   quality: new Map(),
 };

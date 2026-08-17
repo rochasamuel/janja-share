@@ -2,7 +2,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, AppHandle, Emitter, Manager, Runtime,
+    App, AppHandle, Emitter, Runtime,
 };
 
 use crate::popover;
@@ -110,6 +110,8 @@ pub fn init<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Used by the single-instance handler, which only exists in release builds.
+#[cfg_attr(debug_assertions, allow(dead_code))]
 pub fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = popover::main_window(app) {
         popover::show(&window, None);

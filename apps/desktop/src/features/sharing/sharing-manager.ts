@@ -6,6 +6,7 @@ import {
   onCaptureEnded,
   startCapture,
   stopCapture,
+  type AudioSource,
   type CaptureOptions,
 } from "./screen-capture.js";
 import { ViewerConnectionManager } from "./viewer-connection-manager.js";
@@ -17,7 +18,9 @@ export interface SharingSnapshot {
   roomId: string | null;
   viewerIds: string[];
   maxViewers: number;
-  hasSystemAudio: boolean;
+  audioSource: AudioSource;
+  /** Which app the sound belongs to, when it is per-app. */
+  audioProcess: string | null;
   /** A short sentence fit to show a person, or null. */
   message: string | null;
   quality: Map<string, ConnectionQuality>;
@@ -47,7 +50,9 @@ export class SharingManager {
   #state: SharingState = "idle";
   #roomId: string | null = null;
   #maxViewers = 6;
-  #hasSystemAudio = false;
+  #audioSource: AudioSource = "none";
+  #audioProcess: string | null = null;
+  #stopAudio: (() => Promise<void>) | undefined;
   #message: string | null = null;
   #quality = new Map<string, ConnectionQuality>();
 
@@ -61,7 +66,8 @@ export class SharingManager {
       roomId: this.#roomId,
       viewerIds: this.#viewers?.viewerIds ?? [],
       maxViewers: this.#maxViewers,
-      hasSystemAudio: this.#hasSystemAudio,
+      audioSource: this.#audioSource,
+      audioProcess: this.#audioProcess,
       message: this.#message,
       quality: new Map(this.#quality),
     };
@@ -78,9 +84,12 @@ export class SharingManager {
     this.#setState("starting", null);
 
     try {
-      const { stream, hasSystemAudio } = await startCapture(this.#options.capture);
-      this.#stream = stream;
-      this.#hasSystemAudio = hasSystemAudio;
+      const capture = await startCapture(this.#options.capture);
+      this.#stream = capture.stream;
+      this.#audioSource = capture.audioSource;
+      this.#audioProcess = capture.audioProcess ?? null;
+      this.#stopAudio = capture.stopAudio;
+      const stream = capture.stream;
 
       this.#stopCaptureListener = onCaptureEnded(stream, () => {
         // Windows' own stop button ended it; the UI must not keep saying LIVE.
@@ -142,12 +151,7 @@ export class SharingManager {
         });
         this.#viewers.setStream(this.#stream);
 
-        this.#setState(
-          "sharing",
-          this.#hasSystemAudio
-            ? null
-            : "Sharing without sound. To include it, stop and share again, ticking the audio option in the Windows picker.",
-        );
+        this.#setState("sharing", audioMessage(this.#audioSource, this.#audioProcess));
         return;
       }
 
@@ -205,8 +209,14 @@ export class SharingManager {
     stopCapture(this.#stream);
     this.#stream = undefined;
 
+    // Releases the native capture thread; without this it keeps running and
+    // holding the process open after the share ends.
+    void this.#stopAudio?.();
+    this.#stopAudio = undefined;
+
     this.#quality.clear();
-    this.#hasSystemAudio = false;
+    this.#audioSource = "none";
+    this.#audioProcess = null;
   }
 
   #setState(state: SharingState, message: string | null): void {
@@ -217,5 +227,18 @@ export class SharingManager {
 
   #emit(): void {
     this.#options.onChange?.(this.snapshot);
+  }
+}
+
+function audioMessage(source: AudioSource, process: string | null): string | null {
+  switch (source) {
+    case "app":
+      // Silence is the right answer when it worked: the readout already says
+      // which app, and a banner for success is noise.
+      return null;
+    case "system":
+      return "Sharing the whole computer's sound — anyone in a voice call with you will be heard too.";
+    case "none":
+      return "Sharing without sound. Stop and share again, ticking the audio option in the Windows picker.";
   }
 }
