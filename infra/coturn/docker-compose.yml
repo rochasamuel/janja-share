@@ -1,0 +1,28 @@
+# TURN relay. Only carries media when a direct peer-to-peer connection fails.
+#
+# Host networking is not optional: coturn hands out relay candidates containing
+# the addresses it sees on its own interfaces, and behind Docker's NAT those
+# addresses are container-internal and unreachable. Port mapping produces a
+# server that looks healthy and relays nothing.
+
+services:
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    container_name: janja-coturn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command:
+      - -c
+      - /etc/coturn/turnserver.conf
+      - --realm=${TURN_REALM:-janja.local}
+      - --static-auth-secret=${TURN_SECRET:?TURN_SECRET must be set in .env}
+      # On a cloud VM with a private NIC, uncomment and set the public address,
+      # otherwise coturn advertises the private one and relaying fails:
+      # - --external-ip=${TURN_EXTERNAL_IP}
+    healthcheck:
+      test: ["CMD", "turnutils_uclient", "-h"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
