@@ -21,12 +21,19 @@ fn quit_app(app: tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        // A second launch (including a future deep link) focuses the running
-        // instance instead of starting a rival copy with its own capture.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            tray::show_main_window(app);
-        }))
+    let builder = tauri::Builder::default();
+
+    // In release a second launch (including a future deep link) focuses the
+    // running instance rather than starting a rival copy with its own
+    // capture. In development that rule makes it impossible to run a sharer
+    // and a viewer on one machine, which is the only way to test the thing
+    // end to end without a second PC — so debug builds allow many instances.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        tray::show_main_window(app);
+    }));
+
+    builder
         .invoke_handler(tauri::generate_handler![set_tray_status, quit_app])
         .setup(|app| {
             tray::init(app)?;
