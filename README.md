@@ -52,7 +52,7 @@ time rather than loudly at boot.
 ## Tests
 
 ```bash
-pnpm test          # 289 tests
+pnpm test          # 316 tests
 pnpm typecheck
 bash scripts/check-rust.sh   # drives the Windows cargo over interop
 ```
@@ -96,10 +96,17 @@ Joining a channel builds nothing. A peer connection appears only when someone
 clicks a member who is sharing, which is what keeps a channel of eight people
 from becoming fifty-six connections.
 
-Each publisher sends one copy of its stream to each of its viewers. Six viewers
-at 6 Mbps is roughly 36 Mbps of upload from that one connection — that ceiling,
-not CPU, is what limits viewer count. WebRTC lowers quality as upload saturates
-rather than dropping viewers. Moving past it means an SFU, which this MVP
+Each publisher sends one copy of its stream to each of its viewers, so the
+uplink — not CPU — is what limits viewer count. WebRTC lowers quality as upload
+saturates rather than dropping viewers.
+
+A copy is not always a whole stream, though. Every viewer tells its publisher
+whether it is showing the picture in the 320px panel or in fullscreen, and the
+publisher scales that one sender to match: a viewer in the panel costs roughly
+a ninth of the pixels of one in fullscreen. Since the panel is where everyone
+starts, the common case is far cheaper than the worst case.
+
+Moving past the uplink ceiling entirely means an SFU, which this MVP
 deliberately does not build, but the WebRTC layer stays modular enough to add
 one later.
 
