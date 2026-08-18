@@ -1,4 +1,9 @@
-import type { IceCandidateInit, IceServer, ServerMessage } from "@janja/signaling-protocol";
+import type {
+  IceCandidateInit,
+  IceServer,
+  ServerMessage,
+  ViewSize,
+} from "@janja/signaling-protocol";
 import type { SignalingClient } from "../../services/signaling/signaling-client.js";
 import {
   classifyQuality,
@@ -56,6 +61,12 @@ export class ViewingManager {
    * the person did nothing to deserve.
    */
   #subscribed = false;
+  /**
+   * How much picture this end can show, which decides what the publisher
+   * bothers to encode. Panel until the user goes fullscreen, and it survives a
+   * stop: whoever they watch next gets the size they are actually in.
+   */
+  #viewSize: ViewSize = "panel";
   #quality: ConnectionQuality = "reconnecting";
   #streamStats: StreamStats | null = null;
   #message: string | null = null;
@@ -94,6 +105,9 @@ export class ViewingManager {
     try {
       this.#options.signaling.send({ type: "watch", publisherId });
       this.#subscribed = true;
+      // Ordering is what makes this safe: one socket, so the server has
+      // created the subscription by the time this lands and it is authorized.
+      this.#sendViewSize();
     } catch {
       this.#setState("error", "Sem conexão com o servidor.");
     }
@@ -113,6 +127,34 @@ export class ViewingManager {
     this.#publisherId = null;
     this.#publisherName = null;
     this.#setState("idle", null);
+  }
+
+  /**
+   * The panel or the whole monitor.
+   *
+   * Kept DOM-free on purpose: the fullscreen event belongs to the browser and
+   * is listened for in use-channel, so this stays a plain, testable state
+   * change.
+   */
+  setViewSize(size: ViewSize): void {
+    if (this.#viewSize === size) return;
+    this.#viewSize = size;
+    this.#sendViewSize();
+  }
+
+  #sendViewSize(): void {
+    const publisherId = this.#publisherId;
+    if (publisherId === null || !this.#subscribed) return;
+    try {
+      this.#options.signaling.send({
+        type: "view-size",
+        publisherId,
+        size: this.#viewSize,
+      });
+    } catch {
+      // A soft picture is survivable, and the next fullscreen change says it
+      // again. Losing this must never take the stream down.
+    }
   }
 
   /** The channel routes a server error here while we are still connecting. */

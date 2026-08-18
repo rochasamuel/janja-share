@@ -88,11 +88,17 @@ describe("ViewingManager", () => {
     FakePeerConnection.instances = [];
   });
 
-  it("asks the server to watch, and nothing else", () => {
+  it("asks the server to watch and says how much it can show, and nothing else", () => {
     const { manager, sent } = setup();
     manager.watch(PUBLISHER, "PC-SAM");
 
-    expect(sent).toEqual([{ type: "watch", publisherId: PUBLISHER }]);
+    // Still builds no connection: the publisher does that. The size rides
+    // along so the very first frame is already scaled to the panel.
+    expect(sent).toEqual([
+      { type: "watch", publisherId: PUBLISHER },
+      { type: "view-size", publisherId: PUBLISHER, size: "panel" },
+    ]);
+    expect(FakePeerConnection.instances).toHaveLength(0);
     expect(manager.snapshot.state).toBe("connecting");
     expect(manager.snapshot.publisherName).toBe("PC-SAM");
   });
@@ -100,11 +106,13 @@ describe("ViewingManager", () => {
   it("answers the sharer's offer", async () => {
     const { manager, sent, deliver } = setup();
     manager.watch(PUBLISHER, "PC-SAM");
+    // The watch and the size are their own test; this one is about the answer.
+    sent.length = 0;
 
     await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
-    await vi.waitFor(() => expect(sent).toHaveLength(2));
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
 
-    expect(sent[1]).toEqual({ type: "answer", targetId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 answer" });
+    expect(sent[0]).toEqual({ type: "answer", targetId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 answer" });
   });
 
   it("hands the incoming stream to the player", async () => {
@@ -247,9 +255,11 @@ describe("ViewingManager", () => {
   it("ignores a second watch while already connecting", () => {
     const { manager, sent } = setup();
     manager.watch(PUBLISHER, "PC-SAM");
+    sent.length = 0;
+
     manager.watch("publisher-2", "PC-ANA");
 
-    expect(sent).toHaveLength(1);
+    expect(sent).toEqual([]);
   });
 
   it("ignores an offer for a stream it did not ask for", async () => {
@@ -328,5 +338,54 @@ describe("ViewingManager", () => {
 
     manager.stop();
     expect(sent).toEqual([{ type: "unwatch", publisherId: PUBLISHER }]);
+  });
+
+  describe("view size", () => {
+    it("reports going fullscreen and coming back", () => {
+      const { manager, sent } = setup();
+      manager.watch(PUBLISHER, "PC-SAM");
+      sent.length = 0;
+
+      manager.setViewSize("fullscreen");
+      manager.setViewSize("panel");
+
+      expect(sent).toEqual([
+        { type: "view-size", publisherId: PUBLISHER, size: "fullscreen" },
+        { type: "view-size", publisherId: PUBLISHER, size: "panel" },
+      ]);
+    });
+
+    it("says nothing when the size did not actually change", () => {
+      const { manager, sent } = setup();
+      manager.watch(PUBLISHER, "PC-SAM");
+      sent.length = 0;
+
+      manager.setViewSize("panel");
+
+      expect(sent).toEqual([]);
+    });
+
+    it("says nothing when it is not watching anyone", () => {
+      const { manager, sent } = setup();
+
+      manager.setViewSize("fullscreen");
+
+      expect(sent).toEqual([]);
+    });
+
+    it("reports the size it was left in when it starts watching again", () => {
+      const { manager, sent } = setup();
+      manager.watch(PUBLISHER, "PC-SAM");
+      manager.setViewSize("fullscreen");
+      manager.stop();
+      sent.length = 0;
+
+      manager.watch("publisher-2", "PC-ANA");
+
+      expect(sent).toEqual([
+        { type: "watch", publisherId: "publisher-2" },
+        { type: "view-size", publisherId: "publisher-2", size: "fullscreen" },
+      ]);
+    });
   });
 });
