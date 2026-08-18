@@ -33,9 +33,10 @@ const rawNameSchema = z.string().min(1).max(MAX_NAME_LENGTH * 2);
 /**
  * How much of the picture a viewer can actually show.
  *
- * Two states rather than a pixel count, because there are only two: a fixed
- * 320px popover and the monitor. A number would bring debounce and
- * devicePixelRatio along with it for a window that cannot be resized.
+ * Two states rather than a pixel count: the fixed 320px popover, or out of it
+ * (the monitor in fullscreen, or a picture-in-picture window the user sizes).
+ * A number would bring debounce and devicePixelRatio along with it, and the
+ * tier is a ceiling the encoder adapts under, not an exact demand.
  */
 export const viewSizeSchema = z.enum(["panel", "fullscreen"]);
 

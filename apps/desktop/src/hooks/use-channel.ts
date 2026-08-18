@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import { ChannelManager, type ChannelSnapshot } from "../features/channel/channel-manager.js";
 import { SharingManager, type SharingSnapshot } from "../features/sharing/sharing-manager.js";
 import { ViewingManager, type ViewingSnapshot } from "../features/viewing/viewing-manager.js";
+import { viewSizeOf } from "../features/viewing/view-size.js";
 import { createPeerConnection } from "../services/webrtc/peer-connection.js";
 import { setPickerMode } from "../services/panel.js";
 import {
@@ -138,20 +139,29 @@ export function useChannel(signaling: SignalingClient | null): UseChannel {
   }, [signaling]);
 
   /**
-   * The browser owns fullscreen, so its event is the source of truth — not the
-   * button in WatchScreen, which is only one of the ways in and out (Escape and
-   * F11 are others). This lives here rather than in the manager so the manager
-   * stays free of the DOM and testable in Node.
+   * The browser owns fullscreen and picture-in-picture, so its events are the
+   * source of truth — not the button in WatchScreen, which is only one of the
+   * ways in and out (Escape, F11 and the video's own context menu are others).
+   * This lives here rather than in the manager so the manager stays free of
+   * the DOM and testable in Node.
+   *
+   * The picture-in-picture events fire on the video element, and the element
+   * comes and goes with the screen; capturing them at the document catches
+   * whichever video is current without re-subscribing on every mount.
    */
   useEffect(() => {
-    const onFullscreenChange = () => {
-      managerRef.current?.viewing.setViewSize(
-        document.fullscreenElement ? "fullscreen" : "panel",
-      );
+    const onViewChange = () => {
+      managerRef.current?.viewing.setViewSize(viewSizeOf(document));
     };
 
-    document.addEventListener("fullscreenchange", onFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("fullscreenchange", onViewChange);
+    document.addEventListener("enterpictureinpicture", onViewChange, true);
+    document.addEventListener("leavepictureinpicture", onViewChange, true);
+    return () => {
+      document.removeEventListener("fullscreenchange", onViewChange);
+      document.removeEventListener("enterpictureinpicture", onViewChange, true);
+      document.removeEventListener("leavepictureinpicture", onViewChange, true);
+    };
   }, []);
 
   /**
