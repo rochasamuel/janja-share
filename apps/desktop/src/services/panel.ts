@@ -37,6 +37,17 @@ export function setPickerMode(enabled: boolean): Promise<void> {
   return invokeSafely("set_picker_mode", { enabled });
 }
 
+/**
+ * Drops the popover's two window rules while a stream fills the screen.
+ *
+ * `alwaysOnTop` and `skipTaskbar` are right for a popover and wrong for
+ * anything fullscreen: the first keeps it painted over whatever you alt-tab
+ * to, the second keeps it out of the alt-tab list entirely.
+ */
+export function setFullscreenMode(enabled: boolean): Promise<void> {
+  return invokeSafely("set_fullscreen_mode", { enabled });
+}
+
 export function hidePanel(): Promise<void> {
   return invokeSafely("hide_panel");
 }

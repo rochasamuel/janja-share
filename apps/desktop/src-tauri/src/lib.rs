@@ -83,6 +83,22 @@ fn hide_panel(window: tauri::WebviewWindow) {
     let _ = window.hide();
 }
 
+/// Lets a fullscreen stream behave like any other window.
+///
+/// The panel is `alwaysOnTop` and `skipTaskbar` because it is a popover, and
+/// both become exactly wrong the moment it fills the screen: it stays painted
+/// over whatever the user alt-tabs to, and it is not in the alt-tab list to
+/// switch back to. Together that reads as the app having seized the machine.
+///
+/// The resting values are constants from tauri.conf.json rather than something
+/// the user can change, so unlike picker mode there is no geometry to save —
+/// leaving fullscreen simply restores both.
+#[tauri::command]
+fn set_fullscreen_mode(window: tauri::WebviewWindow, enabled: bool) {
+    let _ = window.set_always_on_top(!enabled);
+    let _ = window.set_skip_taskbar(!enabled);
+}
+
 /// Brings the panel up from wherever the user was.
 ///
 /// Needed by the global shortcut: pressed with no channel joined there is
@@ -223,6 +239,7 @@ pub fn run() {
             set_picker_mode,
             hide_panel,
             show_panel,
+            set_fullscreen_mode,
             describe_window,
             list_capture_sources,
             start_app_audio,

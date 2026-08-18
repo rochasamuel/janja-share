@@ -10,7 +10,13 @@ import { ShareScreen } from "./features/sharing/ShareScreen.js";
 import { WatchScreen } from "./features/viewing/WatchScreen.js";
 import { useSignaling } from "./hooks/use-signaling.js";
 import { useChannel } from "./hooks/use-channel.js";
-import { hidePanel, quitApp, setAutoHide, showPanel } from "./services/panel.js";
+import {
+  hidePanel,
+  quitApp,
+  setAutoHide,
+  setFullscreenMode,
+  showPanel,
+} from "./services/panel.js";
 import { shareShortcutAction } from "./services/share-shortcut.js";
 import { setTrayStatus } from "./services/tray-status.js";
 import type { SignalingState } from "./services/signaling/signaling-client.js";
@@ -94,6 +100,28 @@ export function App() {
     channel.sharing.viewerIds.length,
     channel.viewing.publisherName,
   ]);
+
+  /**
+   * A fullscreen stream must not seize the machine.
+   *
+   * This is a window concern rather than a channel one, which is why it lives
+   * here and not next to the other fullscreen listener in use-channel: that
+   * one tells the publisher how much picture to send, and this one decides how
+   * the window behaves while it does.
+   */
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      void setFullscreenMode(document.fullscreenElement !== null);
+    };
+
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      // Leaving the app mid-fullscreen must not strand the panel without its
+      // popover rules; it would come back floating over everything.
+      void setFullscreenMode(false);
+    };
+  }, []);
 
   useEffect(() => {
     let dispose: (() => void) | undefined;
