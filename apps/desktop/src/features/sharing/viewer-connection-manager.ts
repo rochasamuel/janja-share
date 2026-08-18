@@ -1,4 +1,4 @@
-import type { ClientMessage, IceCandidateInit } from "@janja/signaling-protocol";
+import type { ClientMessage, IceCandidateInit, ViewSize } from "@janja/signaling-protocol";
 import { StatsTracker } from "../../services/webrtc/stats-tracker.js";
 import {
   classifyQuality,
@@ -41,7 +41,21 @@ interface ViewerEntry {
   quality: ConnectionQuality;
   /** Last reading, or null while this viewer's statistics are unreadable. */
   sample: QualitySample | null;
+  /**
+   * How much picture this viewer can show. Panel until it says otherwise,
+   * because the panel is where every viewer starts.
+   */
+  size: ViewSize;
 }
+
+/**
+ * How far down to scale for each size a viewer can report.
+ *
+ * 1920/3 is 640 device pixels across, and the panel's 312px element at
+ * devicePixelRatio 2 needs 624 — so the panel is covered with nothing spent on
+ * detail it cannot resolve. Fullscreen gets the picture untouched.
+ */
+const SCALE_FOR: Record<ViewSize, number> = { panel: 3, fullscreen: 1 };
 
 const DEFAULT_ENCODING: EncodingSettings = {
   maxBitrateBps: 8_000_000,
@@ -108,6 +122,7 @@ export class ViewerConnectionManager {
       stats: new StatsTracker("send"),
       quality: "reconnecting",
       sample: null,
+      size: "panel",
     };
     this.#viewers.set(viewerId, entry);
     this.#notifyViewersChanged();
@@ -137,7 +152,7 @@ export class ViewerConnectionManager {
       // Both of these have to happen before the offer exists. The offer is
       // the only one this connection ever makes.
       (this.#options.applyCodecPreferences ?? applyCodecPreferences)(connection);
-      this.#applySendParameters(connection);
+      this.#applySendParameters(connection, entry.size);
 
       const offer = await connection.createOffer();
       await connection.setLocalDescription(offer);
@@ -231,11 +246,24 @@ export class ViewerConnectionManager {
   setEncoding(encoding: EncodingSettings): void {
     this.#encoding = encoding;
     for (const entry of this.#viewers.values()) {
-      this.#applySendParameters(entry.connection);
+      this.#applySendParameters(entry.connection, entry.size);
     }
   }
 
-  #applySendParameters(connection: RTCPeerConnection): void {
+  /**
+   * A viewer reported how much picture it can show.
+   *
+   * Like setEncoding, this is a parameter change and not a renegotiation, so
+   * going fullscreen costs nobody their picture.
+   */
+  setViewerSize(viewerId: string, size: ViewSize): void {
+    const entry = this.#viewers.get(viewerId);
+    if (!entry || entry.size === size) return;
+    entry.size = size;
+    this.#applySendParameters(entry.connection, size);
+  }
+
+  #applySendParameters(connection: RTCPeerConnection, size: ViewSize): void {
     const { maxBitrateBps, degradationPreference } = this.#encoding;
 
     for (const sender of connection.getSenders()) {
@@ -248,6 +276,7 @@ export class ViewerConnectionManager {
           : [{}];
         for (const encoding of parameters.encodings) {
           encoding.maxBitrate = maxBitrateBps;
+          encoding.scaleResolutionDownBy = SCALE_FOR[size];
         }
         parameters.degradationPreference = degradationPreference;
         void sender.setParameters(parameters);

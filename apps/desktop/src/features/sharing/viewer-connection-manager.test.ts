@@ -325,6 +325,59 @@ describe("ViewerConnectionManager", () => {
     });
   });
 
+  describe("view size", () => {
+    it("sends a panel-sized picture until the viewer says otherwise", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.scaleResolutionDownBy).toBe(3);
+    });
+
+    it("sends the whole picture to a viewer in fullscreen", async () => {
+      const { manager, sent } = setup();
+      await manager.addViewer("viewer-1");
+      const offersBefore = sent.filter((message) => message.type === "offer").length;
+
+      manager.setViewerSize("viewer-1", "fullscreen");
+
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.scaleResolutionDownBy).toBe(1);
+      // Same reason setEncoding goes through setParameters: no renegotiation,
+      // so going fullscreen costs nobody their picture.
+      expect(sent.filter((message) => message.type === "offer").length).toBe(offersBefore);
+    });
+
+    it("keeps each viewer's own scale when the preset changes", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+      await manager.addViewer("viewer-2");
+      manager.setViewerSize("viewer-2", "fullscreen");
+
+      manager.setEncoding({ maxBitrateBps: 1_000_000, degradationPreference: "balanced" });
+
+      const first = pcFor(0).parametersOfVideoSender().encodings?.[0];
+      const second = pcFor(1).parametersOfVideoSender().encodings?.[0];
+      expect(first?.scaleResolutionDownBy).toBe(3);
+      expect(second?.scaleResolutionDownBy).toBe(1);
+      expect(first?.maxBitrate).toBe(1_000_000);
+      expect(second?.maxBitrate).toBe(1_000_000);
+    });
+
+    it("gives a viewer who joins later the panel scale", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+      manager.setViewerSize("viewer-1", "fullscreen");
+
+      await manager.addViewer("viewer-2");
+
+      expect(pcFor(1).parametersOfVideoSender().encodings?.[0]?.scaleResolutionDownBy).toBe(3);
+    });
+
+    it("ignores a size for a viewer that has already gone", () => {
+      const { manager } = setup();
+      expect(() => manager.setViewerSize("ghost", "fullscreen")).not.toThrow();
+    });
+  });
+
   describe("stream statistics", () => {
     const sharerReport = (rttSeconds: number, bytesSent: number, timestamp: number) => [
       { type: "candidate-pair", state: "succeeded", currentRoundTripTime: rttSeconds },
