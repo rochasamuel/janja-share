@@ -5,6 +5,8 @@ import { ViewerConnectionManager } from "./viewer-connection-manager.js";
 /** Enough of RTCPeerConnection to negotiate, fail, and be closed. */
 class FakePeerConnection {
   static instances: FakePeerConnection[] = [];
+  /** Ordered record of the steps whose sequence matters. */
+  static calls: string[] = [];
 
   onicecandidate: ((event: { candidate: RTCIceCandidate | null }) => void) | null = null;
   onconnectionstatechange: (() => void) | null = null;
@@ -46,6 +48,7 @@ class FakePeerConnection {
 
   async createOffer(): Promise<RTCSessionDescriptionInit> {
     if (this.failOn === "createOffer") throw new Error("createOffer failed");
+    FakePeerConnection.calls.push("createOffer");
     return { type: "offer", sdp: "v=0 offer" };
   }
 
@@ -127,6 +130,7 @@ const pcFor = (index: number) => FakePeerConnection.instances[index]!;
 describe("ViewerConnectionManager", () => {
   beforeEach(() => {
     FakePeerConnection.instances = [];
+    FakePeerConnection.calls = [];
   });
 
   it("offers to a new viewer with the capture tracks attached", async () => {
@@ -200,6 +204,165 @@ describe("ViewerConnectionManager", () => {
     const parameters = pcFor(0).parametersOfVideoSender();
     expect(parameters.encodings?.[0]?.maxBitrate).toBe(8_000_000);
     expect(parameters.degradationPreference).toBe("maintain-resolution");
+  });
+
+  describe("codec preference", () => {
+    it("picks the codec before the offer is built, not after", async () => {
+      // The offer is the only one this connection ever makes: the sharer never
+      // re-negotiates. A preference applied on `negotiationneeded` lands after
+      // `createOffer` has already been called, so it never reaches the wire —
+      // and the connection falls back to VP8, which no GPU encodes in
+      // hardware. Six software encodes is what eats the CPU.
+      const applied: string[] = [];
+      const manager = new ViewerConnectionManager({
+        createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+        send: () => {},
+        applyCodecPreferences: () => {
+          FakePeerConnection.calls.push("codecs");
+          applied.push("once");
+        },
+      });
+      manager.setStream(fakeStream());
+
+      await manager.addViewer("viewer-1");
+
+      expect(applied).toHaveLength(1);
+      expect(FakePeerConnection.calls).toEqual(["codecs", "createOffer"]);
+    });
+
+    it("does so for every viewer, not just the first", async () => {
+      let count = 0;
+      const manager = new ViewerConnectionManager({
+        createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+        send: () => {},
+        applyCodecPreferences: () => {
+          count += 1;
+        },
+      });
+      manager.setStream(fakeStream());
+
+      await manager.addViewer("viewer-1");
+      await manager.addViewer("viewer-2");
+
+      expect(count).toBe(2);
+    });
+  });
+
+  describe("encoding settings", () => {
+    it("uses the ceiling it was built with", async () => {
+      const manager = new ViewerConnectionManager({
+        createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+        send: () => {},
+        encoding: { maxBitrateBps: 2_500_000, degradationPreference: "maintain-framerate" },
+      });
+      manager.setStream(fakeStream());
+      await manager.addViewer("viewer-1");
+
+      const parameters = pcFor(0).parametersOfVideoSender();
+      expect(parameters.encodings?.[0]?.maxBitrate).toBe(2_500_000);
+      expect(parameters.degradationPreference).toBe("maintain-framerate");
+    });
+
+    it("re-aims every live sender when the preset changes mid-share", async () => {
+      // The whole point of doing this through setParameters: nobody watching
+      // loses their picture, because there is no renegotiation.
+      const { manager, sent } = setup();
+      await manager.addViewer("viewer-1");
+      await manager.addViewer("viewer-2");
+      const offersBefore = sent.filter((message) => message.type === "offer").length;
+
+      manager.setEncoding({
+        maxBitrateBps: 12_000_000,
+        degradationPreference: "maintain-framerate",
+      });
+
+      for (const index of [0, 1]) {
+        const parameters = pcFor(index).parametersOfVideoSender();
+        expect(parameters.encodings?.[0]?.maxBitrate).toBe(12_000_000);
+        expect(parameters.degradationPreference).toBe("maintain-framerate");
+      }
+      expect(sent.filter((message) => message.type === "offer").length).toBe(offersBefore);
+    });
+
+    it("applies the new ceiling to viewers who join afterwards", async () => {
+      const { manager } = setup();
+      manager.setEncoding({
+        maxBitrateBps: 2_500_000,
+        degradationPreference: "maintain-resolution",
+      });
+      await manager.addViewer("viewer-1");
+
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(2_500_000);
+    });
+  });
+
+  describe("stream statistics", () => {
+    const sharerReport = (rttSeconds: number, bytesSent: number, timestamp: number) => [
+      { type: "candidate-pair", state: "succeeded", currentRoundTripTime: rttSeconds },
+      {
+        type: "outbound-rtp",
+        kind: "video",
+        framesPerSecond: 58,
+        frameWidth: 1920,
+        frameHeight: 1080,
+        bytesSent,
+        timestamp,
+      },
+    ];
+
+    it("has nothing to report before the first poll", () => {
+      const { manager } = setup();
+      expect(manager.stats).toBeNull();
+    });
+
+    it("folds every viewer into one reading", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+      await manager.addViewer("viewer-2");
+      for (const index of [0, 1]) pcFor(index).iceConnectionState = "connected";
+
+      pcFor(0).statsReport = sharerReport(0.04, 0, 1000);
+      pcFor(1).statsReport = sharerReport(0.32, 0, 1000);
+      await manager.pollQuality();
+
+      pcFor(0).statsReport = sharerReport(0.04, 500_000, 3000);
+      pcFor(1).statsReport = sharerReport(0.32, 250_000, 3000);
+      await manager.pollQuality();
+
+      // Worst latency, summed rate: 2 Mbps out to one viewer and 1 Mbps to
+      // the other is 3 Mbps leaving this machine.
+      expect(manager.stats).toMatchObject({
+        rttMs: 320,
+        bitrateBps: 3_000_000,
+        frameWidth: 1920,
+        framesPerSecond: 58,
+      });
+    });
+
+    it("leaves out a viewer whose statistics cannot be read", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+      await manager.addViewer("viewer-2");
+      pcFor(0).iceConnectionState = "connected";
+      pcFor(0).statsReport = sharerReport(0.04, 0, 1000);
+      pcFor(1).failOn = "getStats";
+
+      await manager.pollQuality();
+
+      expect(manager.stats?.rttMs).toBe(40);
+    });
+
+    it("forgets a viewer's numbers once they leave", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+      pcFor(0).iceConnectionState = "connected";
+      pcFor(0).statsReport = sharerReport(0.04, 0, 1000);
+      await manager.pollQuality();
+
+      manager.removeViewer("viewer-1");
+
+      expect(manager.stats).toBeNull();
+    });
   });
 
   describe("viewer isolation", () => {
@@ -311,9 +474,11 @@ describe("ViewerConnectionManager", () => {
       await manager.addViewer("viewer-2");
 
       pcFor(0).iceConnectionState = "connected";
+      // A sharer's connection reports outbound-rtp. There is no inbound video
+      // on this end at all.
       pcFor(0).statsReport = [
         { type: "candidate-pair", state: "succeeded", currentRoundTripTime: 0.02 },
-        { type: "inbound-rtp", kind: "video", framesPerSecond: 60, packetsReceived: 10, packetsLost: 0 },
+        { type: "outbound-rtp", kind: "video", framesPerSecond: 60, packetsSent: 10 },
       ];
       pcFor(1).iceConnectionState = "disconnected";
 

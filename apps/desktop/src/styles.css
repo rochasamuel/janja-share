@@ -1,4 +1,4 @@
-/* ScreenShare — a tray popover.
+/* Janja Share — a tray popover.
    The window itself is transparent and undecorated; everything visible is
    painted by .panel below, which is why nothing here may use an opaque body
    background. */
@@ -100,39 +100,40 @@ body {
   color: var(--ink-faint);
 }
 
-/* --- tally light ------------------------------------------------------ */
+/* --- status mark ------------------------------------------------------ */
 
+/* The app's own glyph, in the state colour. The tray shows the same drawing
+   in the same colour, so the icon in the corner and the icon in the header
+   are recognisably one thing. `scripts/make-icons.py` holds the other copy. */
 .tally {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ink-faint);
+  display: flex;
   flex: none;
+  color: var(--ink-dim);
 }
 
 .tally[data-state="live"] {
-  background: var(--live);
-  box-shadow: 0 0 0 3px var(--live-glow);
+  color: var(--live);
+  filter: drop-shadow(0 0 4px var(--live-glow));
   animation: pulse 2.4s ease-in-out infinite;
 }
 
 .tally[data-state="watching"] {
-  background: var(--watch);
-  box-shadow: 0 0 0 3px var(--watch-glow);
+  color: var(--watch);
+  filter: drop-shadow(0 0 4px var(--watch-glow));
 }
 
 .tally[data-state="error"] {
-  background: var(--fault);
-  box-shadow: 0 0 0 3px rgba(242, 85, 90, 0.28);
+  color: var(--fault);
+  filter: drop-shadow(0 0 4px rgba(242, 85, 90, 0.28));
 }
 
 @keyframes pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 3px var(--live-glow);
+    filter: drop-shadow(0 0 3px var(--live-glow));
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(245, 165, 36, 0.06);
+    filter: drop-shadow(0 0 7px var(--live-glow));
   }
 }
 
@@ -259,6 +260,25 @@ body {
 /* A row that is text only, like About or Check for updates. */
 .row[data-plain="true"] {
   padding-left: 8px;
+}
+
+/* --- a row that is one of several choices ----------------------------- */
+
+.choice-mark {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 1px solid var(--ink-faint);
+  border-radius: 50%;
+}
+
+.row.choice[data-selected="true"] .choice-mark {
+  border-color: var(--accent);
+  background: radial-gradient(circle at center, var(--accent) 0 3px, transparent 3px);
+}
+
+.row.choice[data-selected="true"] .shortcut {
+  color: var(--ink-dim);
 }
 
 .divider {

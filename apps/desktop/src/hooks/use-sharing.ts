@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { config } from "../config.js";
 import { SharingManager, type SharingSnapshot } from "../features/sharing/sharing-manager.js";
 import { createPeerConnection } from "../services/webrtc/peer-connection.js";
 import { setAutoHide, setPickerMode } from "../services/panel.js";
+import { QUALITY_PRESETS, loadPreset, savePreset, type QualityPreset } from "../services/settings.js";
 import { setTrayStatus } from "../services/tray-status.js";
 import type { SignalingClient } from "../services/signaling/signaling-client.js";
 
@@ -15,6 +16,7 @@ const EMPTY: SharingSnapshot = {
   audioProcess: null,
   message: null,
   quality: new Map(),
+  stats: null,
 };
 
 /**
@@ -28,20 +30,34 @@ export function useSharing(signaling: SignalingClient | null): {
   snapshot: SharingSnapshot;
   /** True while Chromium's picker is on screen. */
   picking: boolean;
+  preset: QualityPreset;
+  setPreset: (preset: QualityPreset) => void;
   start: () => Promise<void>;
   stop: () => Promise<void>;
 } {
   const managerRef = useRef<SharingManager | null>(null);
   const [snapshot, setSnapshot] = useState<SharingSnapshot>(EMPTY);
   const [picking, setPicking] = useState(false);
+  // Read once, at the first render: the stored preset is what the next share
+  // uses, and nothing else can change it behind this hook's back.
+  const [preset, setStoredPreset] = useState<QualityPreset>(loadPreset);
 
   if (managerRef.current === null && signaling) {
     managerRef.current = new SharingManager({
       signaling,
       createPeerConnection,
+      quality: QUALITY_PRESETS[preset].profile,
       onChange: setSnapshot,
     });
   }
+
+  const setPreset = useCallback((next: QualityPreset) => {
+    setStoredPreset(next);
+    savePreset(next);
+    // Live if a share is running, remembered if not. Either way the manager
+    // owns the decision from here.
+    void managerRef.current?.setQuality(QUALITY_PRESETS[next].profile);
+  }, []);
 
   useEffect(() => {
     const manager = managerRef.current;
@@ -57,7 +73,7 @@ export function useSharing(signaling: SignalingClient | null): {
   useEffect(() => {
     if (snapshot.state === "sharing") {
       const count = snapshot.viewerIds.length;
-      void setTrayStatus("sharing", `${count} ${count === 1 ? "viewer" : "viewers"}`);
+      void setTrayStatus("sharing", `${count} ${count === 1 ? "espectador" : "espectadores"}`);
     } else if (snapshot.state === "error") {
       void setTrayStatus("error", snapshot.message ?? undefined);
     } else if (snapshot.state === "idle") {
@@ -68,6 +84,8 @@ export function useSharing(signaling: SignalingClient | null): {
   return {
     snapshot,
     picking,
+    preset,
+    setPreset,
     /**
      * Starts capture, growing the window around Chromium's picker.
      *

@@ -200,14 +200,14 @@ describe("ViewingManager", () => {
     deliver({ type: "room-ended", reason: "sharer-left" });
 
     expect(manager.snapshot.state).toBe("disconnected");
-    expect(manager.snapshot.message).toBe("The stream has ended.");
+    expect(manager.snapshot.message).toBe("A transmissão foi encerrada.");
     expect(pc().closed).toBe(true);
   });
 
   it("translates server errors into something a person can act on", () => {
     const cases = [
-      { code: "ROOM_NOT_FOUND", expected: "That room code doesn't match a live stream." },
-      { code: "ROOM_FULL", expected: "This stream is full." },
+      { code: "ROOM_NOT_FOUND", expected: "Esse código não corresponde a nenhuma transmissão ao vivo." },
+      { code: "ROOM_FULL", expected: "Esta transmissão está lotada." },
     ] as const;
 
     for (const { code, expected } of cases) {
@@ -242,7 +242,7 @@ describe("ViewingManager", () => {
     await deliver({ type: "offer", fromId: "s1", sdp: "garbage" });
 
     await vi.waitFor(() => expect(manager.snapshot.state).toBe("error"));
-    expect(manager.snapshot.message).toBe("Unable to connect to the stream.");
+    expect(manager.snapshot.message).toBe("Não foi possível conectar à transmissão.");
   });
 
   it("tears everything down on leave", async () => {

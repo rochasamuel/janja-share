@@ -6,7 +6,7 @@ Verdict: **capture and system audio both work. Build the sharer in TypeScript.**
 
 ## Measurements
 
-Run inside the real ScreenShare window, not a browser. (An earlier run in
+Run inside the real Janja Share window, not a browser. (An earlier run in
 Firefox reported zero audio tracks and was discarded — Firefox has never
 implemented audio in `getDisplayMedia`, so it cannot answer this question. The
 probe now detects the engine and refuses to present such a run as a result.)

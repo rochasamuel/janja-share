@@ -1,13 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
+import { Icon } from "./components/Icon.js";
 import { HomeScreen } from "./features/home/HomeScreen.js";
 import { DiagnosticsScreen } from "./features/diagnostics/DiagnosticsScreen.js";
+import { QualityScreen } from "./features/settings/QualityScreen.js";
 import { ShareScreen } from "./features/sharing/ShareScreen.js";
 import { WatchScreen } from "./features/viewing/WatchScreen.js";
 import { useSignaling } from "./hooks/use-signaling.js";
 import { useSharing } from "./hooks/use-sharing.js";
 import { hidePanel, quitApp } from "./services/panel.js";
+import type { SignalingState } from "./services/signaling/signaling-client.js";
 
-type Screen = "home" | "diagnostics" | "share" | "watch";
+type Screen = "home" | "diagnostics" | "quality" | "share" | "watch";
+
+/** The two failing states are handled separately, above the panel. */
+const STATE_LABEL: Record<SignalingState, string> = {
+  idle: "parado",
+  connecting: "conectando",
+  connected: "conectado",
+  reconnecting: "reconectando",
+  failed: "sem conexão",
+};
 
 export function App() {
   const [screen, setScreen] = useState<Screen>("home");
@@ -53,6 +65,7 @@ export function App() {
       }
       else if (key === "w") setScreen("watch");
       else if (key === "d") setScreen("diagnostics");
+      else if (key === ",") setScreen("quality");
       else if (key === "q") void quitApp();
       else if (key === ".") void sharing.stop();
       else return;
@@ -71,17 +84,21 @@ export function App() {
   return (
     <div className="panel">
       <header className="header">
-        <span className="tally" data-state={tally} />
-        <span className="wordmark">ScreenShare</span>
+        <span className="tally" data-state={tally}>
+          <Icon name="status" size={15} />
+        </span>
+        <span className="wordmark">Janja Share</span>
         <span className="spacer" />
-        <span className="state">{offline ? "offline" : live ? "live" : signalingState}</span>
+        <span className="state">
+          {offline ? "sem conexão" : live ? "ao vivo" : STATE_LABEL[signalingState]}
+        </span>
       </header>
 
       {offline ? (
         <div className="notice">
           {signalingState === "failed"
-            ? "Can't reach the server. Check it's running, then reopen."
-            : "Reconnecting…"}
+            ? "Não foi possível falar com o servidor. Confira se ele está no ar e abra de novo."
+            : "Reconectando…"}
         </div>
       ) : null}
 
@@ -96,6 +113,7 @@ export function App() {
           }}
           onWatch={() => setScreen("watch")}
           onDiagnostics={() => setScreen("diagnostics")}
+          onQuality={() => setScreen("quality")}
           onStopSharing={() => void sharing.stop()}
           sharing={live}
           viewerCount={sharing.snapshot.viewerIds.length}
@@ -104,6 +122,15 @@ export function App() {
       ) : null}
 
       {screen === "diagnostics" ? <DiagnosticsScreen onBack={home} /> : null}
+
+      {screen === "quality" ? (
+        <QualityScreen
+          preset={sharing.preset}
+          sharing={live}
+          onSelect={sharing.setPreset}
+          onBack={home}
+        />
+      ) : null}
 
       {screen === "share" ? (
         <ShareScreen

@@ -90,34 +90,34 @@ export function summarizeNamedSource(
   sources: CaptureSource[],
 ): string {
   const lines = [
-    `sources found:     ${sources.length}`,
-    `tried:             ${result.sourceId}`,
+    `fontes encontradas: ${sources.length}`,
+    `tentada:            ${result.sourceId}`,
     "",
   ];
 
   if (result.supported) {
     lines.push(
-      "NAMED SOURCE CAPTURE WORKS.",
-      `captured ${result.width ?? "?"}x${result.height ?? "?"} with no picker.`,
+      "CAPTURA DE FONTE NOMEADA FUNCIONA.",
+      `capturou ${result.width ?? "?"}x${result.height ?? "?"} sem nenhum seletor.`,
       "",
-      "A custom picker is possible without leaving Tauri.",
+      "Dá para ter um seletor próprio sem sair do Tauri.",
     );
   } else {
     lines.push(
-      "Named source capture refused.",
+      "Captura de fonte nomeada recusada.",
       `${result.errorName}: ${result.errorMessage}`,
       "",
-      "Expected: WebView2 gates the legacy constraint the way plain Chromium",
-      "does. A custom picker would mean either an Electron shell or native",
-      "video capture in Rust.",
+      "Esperado: o WebView2 bloqueia a constraint antiga do mesmo jeito que o",
+      "Chromium puro. Um seletor próprio exigiria ou uma casca Electron ou",
+      "captura de vídeo nativa em Rust.",
     );
   }
 
-  lines.push("", "--- sources ---");
+  lines.push("", "--- fontes ---");
   for (const source of sources.slice(0, 12)) {
     lines.push(`${source.id.padEnd(22)} ${source.process.padEnd(18)} ${source.title.slice(0, 40)}`);
   }
-  if (sources.length > 12) lines.push(`… and ${sources.length - 12} more`);
+  if (sources.length > 12) lines.push(`… e mais ${sources.length - 12}`);
 
   return lines.join("\n");
 }

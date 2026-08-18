@@ -10,8 +10,25 @@ export interface QualitySample {
   rttMs: number | null;
   /** Packets lost over the last interval as a ratio, 0 to 1. */
   packetLossRatio: number | null;
-  /** Decoded frames per second, or null when nothing has arrived yet. */
+  /** Frames per second, encoded or decoded, or null when nothing moved yet. */
   framesPerSecond: number | null;
+  /** Video bits per second over the last interval, or null. */
+  bitrateBps: number | null;
+  /** Size of the picture actually on the wire, which is not the monitor's. */
+  frameWidth: number | null;
+  frameHeight: number | null;
+  /** Negotiated codec, short form: "H264", "VP8". */
+  codec: string | null;
+  /**
+   * Whether the codec is running on the GPU.
+   *
+   * This is the number that explains a busy CPU. H.264 has a hardware encoder
+   * on essentially every Windows machine; VP8 has one nowhere, and the sharer
+   * runs one encoder per viewer.
+   */
+  powerEfficient: boolean | null;
+  /** What Chromium calls the implementation, e.g. "ExternalEncoder", "libvpx". */
+  implementation: string | null;
   iceState: RTCIceConnectionState;
 }
 

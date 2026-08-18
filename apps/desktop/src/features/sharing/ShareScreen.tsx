@@ -1,6 +1,18 @@
 import { useCallback, useState } from "react";
 import { Row } from "../../components/Row.js";
+import type { ConnectionQuality } from "../../services/webrtc/connection-quality.js";
+import { formatEncoder, formatNetwork, formatScreen } from "../../services/webrtc/stream-stats.js";
 import type { SharingSnapshot } from "./sharing-manager.js";
+
+/**
+ * Colours the network line by the worst viewer, matching the rule the grading
+ * itself uses: one person with an unusable picture is not a healthy share.
+ */
+function networkTone(quality: Map<string, ConnectionQuality>): "ok" | "fault" | undefined {
+  const grades = [...quality.values()];
+  if (grades.length === 0) return undefined;
+  return grades.some((grade) => grade === "poor" || grade === "reconnecting") ? "fault" : "ok";
+}
 
 interface Props {
   snapshot: SharingSnapshot;
@@ -26,10 +38,10 @@ export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Prop
     // frame, so the moment reads as part of the app.
     return (
       <div className="picking">
-        <div className="picking-title">Choose what to share</div>
+        <div className="picking-title">Escolha o que compartilhar</div>
         <div className="picking-hint">
-          Pick a window or a screen above, and turn on <strong>Share audio</strong>{" "}
-          before you confirm.
+          Selecione uma janela ou uma tela acima e marque{" "}
+          <strong>Compartilhar áudio</strong> antes de confirmar.
         </div>
       </div>
     );
@@ -41,10 +53,10 @@ export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Prop
       <>
         <div className="card">
           <div className="headline">
-            {snapshot.state === "error" ? "That didn't work" : "Nothing selected"}
+            {snapshot.state === "error" ? "Não deu certo" : "Nada selecionado"}
           </div>
           {snapshot.state === "error" ? null : (
-            <div className="sub">You closed the picker without choosing</div>
+            <div className="sub">Você fechou o seletor sem escolher nada</div>
           )}
         </div>
 
@@ -56,17 +68,21 @@ export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Prop
         <div className="divider" />
 
         <div className="rows">
-          <Row icon="share" label="Try again" onClick={() => void onStart()} />
-          <Row icon="back" label="Back" shortcut="Esc" onClick={onBack} />
+          <Row icon="share" label="Tentar de novo" onClick={() => void onStart()} />
+          <Row icon="back" label="Voltar" shortcut="Esc" onClick={onBack} />
         </div>
       </>
     );
   }
 
+  const screenLine = formatScreen(snapshot.stats);
+  const networkLine = formatNetwork(snapshot.stats);
+  const encoderLine = formatEncoder(snapshot.stats);
+
   return (
     <>
       <div className="card">
-        <div className="sub">Room code</div>
+        <div className="sub">Código da sala</div>
         <div className="code">{snapshot.roomId}</div>
         <div className="meter">
           <span
@@ -78,13 +94,13 @@ export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Prop
       </div>
 
       <div className="readout">
-        <span className="key">Watching</span>
+        <span className="key">Assistindo</span>
         <span className="value">
           {snapshot.viewerIds.length} / {snapshot.maxViewers}
         </span>
       </div>
       <div className="readout">
-        <span className="key">Sound</span>
+        <span className="key">Som</span>
         <span
           className="value"
           data-tone={
@@ -96,12 +112,41 @@ export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Prop
           }
         >
           {snapshot.audioSource === "app"
-            ? (snapshot.audioProcess ?? "this app only")
+            ? (snapshot.audioProcess ?? "só deste app")
             : snapshot.audioSource === "system"
-              ? "whole computer"
-              : "off"}
+              ? "computador inteiro"
+              : "sem som"}
         </span>
       </div>
+
+      {screenLine ? (
+        <div className="readout">
+          <span className="key">Imagem</span>
+          <span className="value">{screenLine}</span>
+        </div>
+      ) : null}
+      {encoderLine ? (
+        <div className="readout">
+          <span className="key">Encoder</span>
+          {/* The one reading that explains a busy CPU. Software encoding is
+              worth flagging in red: it is the difference between the GPU
+              doing this work and your game losing frames to it. */}
+          <span
+            className="value"
+            data-tone={snapshot.stats?.powerEfficient === false ? "fault" : undefined}
+          >
+            {encoderLine}
+          </span>
+        </div>
+      ) : null}
+      {networkLine ? (
+        <div className="readout">
+          <span className="key">Rede</span>
+          <span className="value" data-tone={networkTone(snapshot.quality)}>
+            {networkLine}
+          </span>
+        </div>
+      ) : null}
 
       {snapshot.message ? (
         <div className="notice" data-tone="warn">
@@ -114,14 +159,14 @@ export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Prop
       <div className="rows">
         <Row
           icon="copy"
-          label={copied === "code" ? "Copied" : "Copy room code"}
+          label={copied === "code" ? "Copiado" : "Copiar código da sala"}
           shortcut="Ctrl C"
           onClick={() => copy(snapshot.roomId ?? "", "code")}
         />
         <Row
           icon="link"
-          label={copied === "link" ? "Copied" : "Copy viewer link"}
-          onClick={() => copy(`screenshare://room/${snapshot.roomId}`, "link")}
+          label={copied === "link" ? "Copiado" : "Copiar link para assistir"}
+          onClick={() => copy(`janjashare://room/${snapshot.roomId}`, "link")}
         />
       </div>
 
@@ -131,12 +176,17 @@ export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Prop
       <div className="rows">
         <Row
           icon="stop"
-          label="Stop sharing"
+          label="Parar de compartilhar"
           shortcut="Ctrl ."
           tone="danger"
           onClick={() => void onStop()}
         />
-        <Row icon="back" label="Back — keeps sharing" shortcut="Esc" onClick={onBack} />
+        <Row
+          icon="back"
+          label="Voltar — continua compartilhando"
+          shortcut="Esc"
+          onClick={onBack}
+        />
       </div>
     </>
   );

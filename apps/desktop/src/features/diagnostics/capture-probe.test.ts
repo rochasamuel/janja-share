@@ -102,15 +102,15 @@ describe("probeCapture", () => {
     );
 
     const text = summarize(result);
-    expect(text).toContain("picker shown:      yes");
+    expect(text).toContain("seletor exibido:   sim");
     expect(text).toContain("1920x1080 @ 60 fps");
-    expect(text).toContain("h264 available:    yes");
-    expect(text).not.toContain("no system audio");
+    expect(text).toContain("h264 disponível:   sim");
+    expect(text).not.toContain("sem som do sistema");
   });
 
   it("calls out missing system audio in the summary", async () => {
     const result = await probeCapture(deps(async () => stream([track("video", "Window")])));
-    expect(summarize(result)).toContain("no system audio");
+    expect(summarize(result)).toContain("sem som do sistema");
   });
 });
 
@@ -141,7 +141,7 @@ describe("engine detection", () => {
     expect(result.trustworthy).toBe(false);
     // Firefox reports zero audio tracks regardless of what Windows can do, so
     // the summary must not let that read as a finding.
-    expect(summarize(result)).toContain("do not answer anything");
+    expect(summarize(result)).toContain("não respondem nada");
   });
 
   it("treats a WebView2 run as trustworthy", async () => {
@@ -152,6 +152,6 @@ describe("engine detection", () => {
     });
 
     expect(result.trustworthy).toBe(true);
-    expect(summarize(result)).toContain("WebView2 (correct host)");
+    expect(summarize(result)).toContain("WebView2 (host correto)");
   });
 });

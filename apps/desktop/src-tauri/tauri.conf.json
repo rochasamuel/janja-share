@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ScreenShare",
+  "productName": "Janja Share",
   "version": "0.1.0",
   "identifier": "com.automatizai.janjashare",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "ScreenShare",
+        "title": "Janja Share",
         "width": 320,
         "height": 440,
         "resizable": false,

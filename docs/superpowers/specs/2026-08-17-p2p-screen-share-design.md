@@ -227,7 +227,7 @@ Microphone capture is not implemented and no microphone permission is requested.
 
 ### 7.4 Viewer
 
-A room code, or a `screenshare://room/<id>` deep link if protocol registration
+A room code, or a `janjashare://room/<id>` deep link if protocol registration
 proves straightforward. The stream renders in a plain `<video>` element — no
 canvas, no frame copying, no custom rendering, so WebView2's hardware path stays
 intact. Fullscreen by button or double click. Volume and mute only.

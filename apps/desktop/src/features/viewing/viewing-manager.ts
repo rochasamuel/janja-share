@@ -5,6 +5,7 @@ import {
   type ConnectionQuality,
 } from "../../services/webrtc/connection-quality.js";
 import { StatsTracker } from "../../services/webrtc/stats-tracker.js";
+import { aggregateStats, type StreamStats } from "../../services/webrtc/stream-stats.js";
 
 export type ViewingState =
   | "idle"
@@ -18,6 +19,8 @@ export interface ViewingSnapshot {
   state: ViewingState;
   roomId: string | null;
   quality: ConnectionQuality;
+  /** The measurements behind that verdict, or null before the first poll. */
+  stats: StreamStats | null;
   /** A short sentence fit to show a person, or null. */
   message: string | null;
 }
@@ -33,7 +36,8 @@ export interface ViewingManagerOptions {
 /** Drives one viewing session: join a room, answer the sharer, render. */
 export class ViewingManager {
   readonly #options: ViewingManagerOptions;
-  readonly #stats = new StatsTracker();
+  // "receive": this end only ever decodes, so its numbers live in inbound-rtp.
+  readonly #stats = new StatsTracker("receive");
 
   #connection: RTCPeerConnection | undefined;
   #unsubscribeSignaling: (() => void) | undefined;
@@ -45,6 +49,7 @@ export class ViewingManager {
   #state: ViewingState = "idle";
   #roomId: string | null = null;
   #quality: ConnectionQuality = "reconnecting";
+  #streamStats: StreamStats | null = null;
   #message: string | null = null;
 
   constructor(options: ViewingManagerOptions) {
@@ -56,6 +61,7 @@ export class ViewingManager {
       state: this.#state,
       roomId: this.#roomId,
       quality: this.#quality,
+      stats: this.#streamStats,
       message: this.#message,
     };
   }
@@ -90,11 +96,13 @@ export class ViewingManager {
 
     try {
       const report = await connection.getStats();
-      this.#quality = classifyQuality(
-        this.#stats.sample(report, connection.iceConnectionState),
-      );
+      const sample = this.#stats.sample(report, connection.iceConnectionState);
+      this.#quality = classifyQuality(sample);
+      this.#streamStats = aggregateStats([sample]);
     } catch {
+      // Stale numbers on a dead connection read as a healthy stream.
       this.#quality = "reconnecting";
+      this.#streamStats = null;
     }
     this.#emit();
   }
@@ -119,7 +127,7 @@ export class ViewingManager {
 
       case "room-ended": {
         this.#cleanup();
-        this.#setState("disconnected", "The stream has ended.");
+        this.#setState("disconnected", "A transmissão foi encerrada.");
         return;
       }
 
@@ -159,7 +167,7 @@ export class ViewingManager {
         sdp: answer.sdp ?? "",
       });
     } catch {
-      this.#setState("error", "Unable to connect to the stream.");
+      this.#setState("error", "Não foi possível conectar à transmissão.");
     }
   }
 
@@ -239,6 +247,7 @@ export class ViewingManager {
     this.#pendingCandidates = [];
     this.#stats.reset();
     this.#quality = "reconnecting";
+    this.#streamStats = null;
     this.#options.onStream?.(null);
   }
 
@@ -256,9 +265,9 @@ export class ViewingManager {
 function viewerErrorMessage(code: string, fallback: string): string {
   switch (code) {
     case "ROOM_NOT_FOUND":
-      return "That room code doesn't match a live stream.";
+      return "Esse código não corresponde a nenhuma transmissão ao vivo.";
     case "ROOM_FULL":
-      return "This stream is full.";
+      return "Esta transmissão está lotada.";
     default:
       return fallback;
   }

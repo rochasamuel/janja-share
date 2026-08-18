@@ -17,9 +17,9 @@ type Source = "screen" | "window";
  */
 export function DiagnosticsScreen({ onBack }: Props) {
   const [log, setLog] = useState<string>(
-    "Run a check and pick a source when Windows asks.\n\n" +
-      "Tick the audio option in the picker, or the result will say there is\n" +
-      "no sound when there could have been.",
+    "Rode um teste e escolha uma fonte quando o Windows perguntar.\n\n" +
+      "Marque a opção de áudio no seletor, senão o resultado vai dizer que\n" +
+      "não há som quando poderia haver.",
   );
   const [busy, setBusy] = useState(false);
   const [lastResult, setLastResult] = useState<ProbeResult | null>(null);
@@ -28,7 +28,9 @@ export function DiagnosticsScreen({ onBack }: Props) {
 
   const run = useCallback(async (source: Source) => {
     setBusy(true);
-    setLog(`Requesting capture — choose ${source === "screen" ? "a whole screen" : "a window"}…`);
+    setLog(
+      `Pedindo a captura — escolha ${source === "screen" ? "uma tela inteira" : "uma janela"}…`,
+    );
 
     // The picker renders inside the webview and takes focus, so the window
     // has to make room for it and stop hiding on blur.
@@ -38,7 +40,7 @@ export function DiagnosticsScreen({ onBack }: Props) {
       setLastResult(result);
       setLog(
         [
-          `=== ${source === "screen" ? "ENTIRE SCREEN" : "SINGLE WINDOW"} ===`,
+          `=== ${source === "screen" ? "TELA INTEIRA" : "UMA JANELA"} ===`,
           summarize(result),
           "",
           `webview: ${result.userAgent}`,
@@ -56,12 +58,12 @@ export function DiagnosticsScreen({ onBack }: Props) {
    */
   const checkNamedSource = useCallback(async () => {
     setBusy(true);
-    setLog("Listing windows and trying to capture one directly…");
+    setLog("Listando janelas e tentando capturar uma direto…");
 
     const sources = await listSources();
     const target = sources.find((source) => source.kind === "window") ?? sources[0];
     if (!target) {
-      setLog("No capture sources found. This needs the desktop app.");
+      setLog("Nenhuma fonte de captura encontrada. Isso precisa do app desktop.");
       setBusy(false);
       return;
     }
@@ -79,22 +81,23 @@ export function DiagnosticsScreen({ onBack }: Props) {
     <>
       {lastResult && !lastResult.trustworthy ? (
         <div className="notice">
-          This is a browser tab, not the app. Firefox and Chrome answer this
-          differently from the engine we ship on, so these numbers mean nothing.
+          Isto é uma aba de navegador, não o app. Firefox e Chrome respondem
+          isto de um jeito diferente do motor que a gente usa, então estes
+          números não valem nada.
         </div>
       ) : null}
 
       {lastResult?.ok === true && lastResult.trustworthy && !lastResult.hasSystemAudio ? (
         <div className="notice" data-tone="warn">
-          Video works, no sound came through. The picker's audio option has to
-          be ticked before you choose a source.
+          O vídeo funciona, mas não veio som. A opção de áudio do seletor
+          precisa estar marcada antes de você escolher a fonte.
         </div>
       ) : null}
 
       {lastResult?.ok === false && lastResult.permissionLikelyDenied ? (
         <div className="notice">
-          Windows never showed a picker. The app is being refused screen access,
-          which is a setting on our side rather than anything you did.
+          O Windows nem mostrou o seletor. O acesso à tela está sendo negado ao
+          app — é configuração do nosso lado, não algo que você fez.
         </div>
       ) : null}
 
@@ -103,16 +106,21 @@ export function DiagnosticsScreen({ onBack }: Props) {
       <div className="divider" />
 
       <div className="rows">
-        <Row icon="pulse" label="Check a screen" disabled={busy} onClick={() => void run("screen")} />
-        <Row icon="pulse" label="Check a window" disabled={busy} onClick={() => void run("window")} />
+        <Row icon="pulse" label="Testar uma tela" disabled={busy} onClick={() => void run("screen")} />
+        <Row
+          icon="pulse"
+          label="Testar uma janela"
+          disabled={busy}
+          onClick={() => void run("window")}
+        />
         <Row
           icon="share"
-          label="Test custom picker"
+          label="Testar seletor próprio"
           disabled={busy}
           onClick={() => void checkNamedSource()}
         />
-        <Row icon="copy" label="Copy results" onClick={copy} />
-        <Row icon="back" label="Back" shortcut="Esc" onClick={onBack} />
+        <Row icon="copy" label="Copiar resultados" onClick={copy} />
+        <Row icon="back" label="Voltar" shortcut="Esc" onClick={onBack} />
       </div>
     </>
   );

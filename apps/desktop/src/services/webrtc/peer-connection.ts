@@ -16,7 +16,6 @@ export function createPeerConnection(iceServers: IceServer[]): RTCPeerConnection
     ...(forceRelay() ? { iceTransportPolicy: "relay" as const } : {}),
   });
 
-  preferCodecs(connection);
   return connection;
 }
 
@@ -30,12 +29,24 @@ function forceRelay(): boolean {
 }
 
 /**
- * Screen content is text and straight edges. H.264 has hardware encoding on
- * essentially every Windows machine, which keeps the sharer's CPU free while
- * it uploads a copy of the stream per viewer; VP9 is the fallback.
+ * Ranks H.264 first on every video transceiver that already has a track.
+ *
+ * Screen content is text and straight edges, and H.264 has hardware encoding on
+ * essentially every Windows machine — which is what keeps the sharer's CPU free
+ * while it encodes one copy of the stream per viewer. VP9 is the fallback; VP8,
+ * which is what WebRTC picks on its own, has no hardware encoder anywhere and
+ * costs a core per viewer.
+ *
+ * **Call this after addTrack and before createOffer.** It used to run from a
+ * `negotiationneeded` listener, but that event is delivered in a queued task,
+ * so it fired after `createOffer` had already been called — and since the
+ * sharer never re-negotiates, the preference reached the wire for nobody.
  */
-function preferCodecs(connection: RTCPeerConnection): void {
-  const capabilities = RTCRtpSender.getCapabilities?.("video");
+export function applyCodecPreferences(connection: RTCPeerConnection): void {
+  // Reached through globalThis so this stays callable outside a browser, where
+  // the identifier itself does not exist and a bare reference would throw.
+  const sender = globalThis.RTCRtpSender as typeof RTCRtpSender | undefined;
+  const capabilities = sender?.getCapabilities?.("video");
   if (!capabilities) return;
 
   const ranked = [
@@ -44,14 +55,12 @@ function preferCodecs(connection: RTCPeerConnection): void {
     ...capabilities.codecs.filter((c) => !/h264|vp9/i.test(c.mimeType)),
   ];
 
-  connection.addEventListener("negotiationneeded", () => {
-    for (const transceiver of connection.getTransceivers()) {
-      if (transceiver.sender.track?.kind !== "video") continue;
-      try {
-        transceiver.setCodecPreferences?.(ranked);
-      } catch {
-        // Unsupported ordering is not worth failing a session over.
-      }
+  for (const transceiver of connection.getTransceivers?.() ?? []) {
+    if (transceiver.sender.track?.kind !== "video") continue;
+    try {
+      transceiver.setCodecPreferences?.(ranked);
+    } catch {
+      // Unsupported ordering is not worth failing a session over.
     }
-  });
+  }
 }

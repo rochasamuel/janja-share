@@ -16,9 +16,31 @@ export type IconName =
   | "mute"
   | "back"
   | "settings"
+  | "quality"
+  | "status"
   | "quit";
 
 const PATHS: Record<IconName, JSX.Element> = {
+  /**
+   * lucide's `circle-dot-dashed`, verbatim, and the app's own mark: the same
+   * drawing is what the tray shows, in the same colours.
+   *
+   * `scripts/make-icons.py` redraws this geometry for the tray and the
+   * installer. The two have to be changed together.
+   */
+  status: (
+    <>
+      <path d="M10.1 2.18a9.93 9.93 0 0 1 3.8 0" />
+      <path d="M17.6 3.71a9.95 9.95 0 0 1 2.69 2.7" />
+      <path d="M21.82 10.1a9.93 9.93 0 0 1 0 3.8" />
+      <path d="M20.29 17.6a9.95 9.95 0 0 1-2.7 2.69" />
+      <path d="M13.9 21.82a9.94 9.94 0 0 1-3.8 0" />
+      <path d="M6.4 20.29a9.95 9.95 0 0 1-2.69-2.7" />
+      <path d="M2.18 13.9a9.93 9.93 0 0 1 0-3.8" />
+      <path d="M3.71 6.4a9.95 9.95 0 0 1 2.7-2.69" />
+      <circle cx="12" cy="12" r="1" />
+    </>
+  ),
   // monitor with an outgoing arrow
   share: (
     <>
@@ -74,6 +96,15 @@ const PATHS: Record<IconName, JSX.Element> = {
       <path d="M8 1.5v1.8M8 12.7v1.8M14.5 8h-1.8M3.3 8H1.5M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3M12.6 12.6l-1.3-1.3M4.7 4.7L3.4 3.4" />
     </>
   ),
+  // two sliders, each broken around its knob
+  quality: (
+    <>
+      <path d="M2 5h4M9.5 5H14" />
+      <circle cx="7.75" cy="5" r="1.75" />
+      <path d="M2 11h6.25M13.75 11H14" />
+      <circle cx="10.25" cy="11" r="1.75" />
+    </>
+  ),
   quit: (
     <>
       <path d="M8 1.8v6" />
@@ -82,21 +113,36 @@ const PATHS: Record<IconName, JSX.Element> = {
   ),
 };
 
+/**
+ * Glyphs that are not drawn on the 16px grid.
+ *
+ * The status mark is lucide's own geometry and is kept on lucide's 24 grid
+ * rather than rescaled by hand — at a 2 unit stroke on 24 it carries the same
+ * weight as 1.3 on 16, so nothing looks heavier next to it.
+ */
+const GRIDS: Partial<Record<IconName, { viewBox: string; strokeWidth: number }>> = {
+  status: { viewBox: "0 0 24 24", strokeWidth: 2 },
+};
+
 interface Props {
   name: IconName;
   className?: string;
+  /** Rendered size in px. The grid it was drawn on does not change. */
+  size?: number;
 }
 
-export function Icon({ name, className }: Props) {
+export function Icon({ name, className, size = 16 }: Props) {
+  const grid = GRIDS[name] ?? { viewBox: "0 0 16 16", strokeWidth: 1.3 };
+
   return (
     <svg
       className={className}
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      viewBox={grid.viewBox}
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.3"
+      strokeWidth={grid.strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"

@@ -4,6 +4,7 @@ import { Row } from "../../components/Row.js";
 import { config } from "../../config.js";
 import { setAutoHide } from "../../services/panel.js";
 import { createPeerConnection } from "../../services/webrtc/peer-connection.js";
+import { formatNetwork, formatScreen } from "../../services/webrtc/stream-stats.js";
 import { setTrayStatus } from "../../services/tray-status.js";
 import type { SignalingClient } from "../../services/signaling/signaling-client.js";
 import { ViewingManager, type ViewingSnapshot } from "./viewing-manager.js";
@@ -14,10 +15,10 @@ interface Props {
 }
 
 const QUALITY_LABEL = {
-  excellent: "Excellent",
-  good: "Good",
-  poor: "Poor",
-  reconnecting: "Reconnecting",
+  excellent: "Excelente",
+  good: "Boa",
+  poor: "Ruim",
+  reconnecting: "Reconectando",
 } as const;
 
 export function WatchScreen({ signaling, onBack }: Props) {
@@ -29,6 +30,7 @@ export function WatchScreen({ signaling, onBack }: Props) {
     state: "idle",
     roomId: null,
     quality: "reconnecting",
+    stats: null,
     message: null,
   });
 
@@ -84,12 +86,14 @@ export function WatchScreen({ signaling, onBack }: Props) {
 
   const watching = snapshot.state === "connected" || snapshot.state === "reconnecting";
   const ready = code.trim().length === ROOM_ID_LENGTH;
+  const screenLine = formatScreen(snapshot.stats);
+  const networkLine = formatNetwork(snapshot.stats);
 
   if (!watching && snapshot.state !== "connecting") {
     return (
       <>
         <div className="card">
-          <div className="sub">Room code</div>
+          <div className="sub">Código da sala</div>
           <input
             className="code-input"
             value={code}
@@ -111,8 +115,8 @@ export function WatchScreen({ signaling, onBack }: Props) {
         <div className="divider" />
 
         <div className="rows">
-          <Row icon="watch" label="Watch" shortcut="Enter" disabled={!ready} onClick={join} />
-          <Row icon="back" label="Back" shortcut="Esc" onClick={onBack} />
+          <Row icon="watch" label="Assistir" shortcut="Enter" disabled={!ready} onClick={join} />
+          <Row icon="back" label="Voltar" shortcut="Esc" onClick={onBack} />
         </div>
       </>
     );
@@ -123,35 +127,48 @@ export function WatchScreen({ signaling, onBack }: Props) {
       <video ref={videoRef} className="video" autoPlay playsInline muted={muted} onDoubleClick={toggleFullscreen} />
 
       <div className="readout">
-        <span className="key">Room</span>
+        <span className="key">Sala</span>
         <span className="value">{snapshot.roomId}</span>
       </div>
       <div className="readout">
-        <span className="key">Connection</span>
+        <span className="key">Conexão</span>
         <span
           className="value"
           data-tone={
             snapshot.quality === "poor" || snapshot.quality === "reconnecting" ? "fault" : "ok"
           }
         >
-          {snapshot.state === "connecting" ? "Connecting" : QUALITY_LABEL[snapshot.quality]}
+          {snapshot.state === "connecting" ? "Conectando" : QUALITY_LABEL[snapshot.quality]}
         </span>
       </div>
+
+      {screenLine ? (
+        <div className="readout">
+          <span className="key">Imagem</span>
+          <span className="value">{screenLine}</span>
+        </div>
+      ) : null}
+      {networkLine ? (
+        <div className="readout">
+          <span className="key">Rede</span>
+          <span className="value">{networkLine}</span>
+        </div>
+      ) : null}
 
       <div className="grow" />
       <div className="divider" />
 
       <div className="rows">
-        <Row icon="expand" label="Fullscreen" shortcut="F" onClick={toggleFullscreen} />
+        <Row icon="expand" label="Tela cheia" shortcut="F" onClick={toggleFullscreen} />
         <Row
           icon={muted ? "mute" : "volume"}
-          label={muted ? "Unmute" : "Mute"}
+          label={muted ? "Ativar som" : "Silenciar"}
           shortcut="M"
           onClick={() => setMuted((value) => !value)}
         />
         <Row
           icon="back"
-          label="Leave"
+          label="Sair da sala"
           shortcut="Esc"
           onClick={() => {
             managerRef.current?.leave();

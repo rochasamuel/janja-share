@@ -1,14 +1,28 @@
 import type { ClientMessage, IceCandidateInit } from "@janja/signaling-protocol";
 import { StatsTracker } from "../../services/webrtc/stats-tracker.js";
-import { classifyQuality, type ConnectionQuality } from "../../services/webrtc/connection-quality.js";
+import {
+  classifyQuality,
+  type ConnectionQuality,
+  type QualitySample,
+} from "../../services/webrtc/connection-quality.js";
+import { aggregateStats, type StreamStats } from "../../services/webrtc/stream-stats.js";
+import { applyCodecPreferences } from "../../services/webrtc/peer-connection.js";
 
 export type PeerConnectionFactory = () => RTCPeerConnection;
+
+/** The half of a quality preset that applies to the encoder, not to capture. */
+export interface EncodingSettings {
+  /** Ceiling, not a target. Congestion control decides the actual rate. */
+  maxBitrateBps: number;
+  degradationPreference: RTCDegradationPreference;
+}
 
 export interface ViewerConnectionManagerOptions {
   createPeerConnection: PeerConnectionFactory;
   send: (message: ClientMessage) => void;
-  /** Ceiling, not a target. Congestion control decides the actual rate. */
-  maxBitrateBps?: number;
+  encoding?: EncodingSettings;
+  /** Injected in tests; defaults to the real H.264-first ranking. */
+  applyCodecPreferences?: (connection: RTCPeerConnection) => void;
   onViewersChanged?: (viewerIds: string[]) => void;
   onError?: (viewerId: string, error: unknown) => void;
 }
@@ -17,9 +31,16 @@ interface ViewerEntry {
   readonly connection: RTCPeerConnection;
   readonly stats: StatsTracker;
   quality: ConnectionQuality;
+  /** Last reading, or null while this viewer's statistics are unreadable. */
+  sample: QualitySample | null;
 }
 
-const DEFAULT_MAX_BITRATE_BPS = 8_000_000;
+const DEFAULT_ENCODING: EncodingSettings = {
+  maxBitrateBps: 8_000_000,
+  // Screen content is unreadable when resolution is sacrificed, so drop frames
+  // instead of pixels when bandwidth gets tight.
+  degradationPreference: "maintain-resolution",
+};
 
 /**
  * One peer connection per viewer, and no shared failure paths between them.
@@ -33,9 +54,19 @@ export class ViewerConnectionManager {
   readonly #viewers = new Map<string, ViewerEntry>();
   readonly #options: ViewerConnectionManagerOptions;
   #stream: MediaStream | undefined;
+  #encoding: EncodingSettings;
 
   constructor(options: ViewerConnectionManagerOptions) {
     this.#options = options;
+    this.#encoding = options.encoding ?? DEFAULT_ENCODING;
+  }
+
+  /** Every viewer's last reading, folded into one. Null before the first poll. */
+  get stats(): StreamStats | null {
+    const samples = [...this.#viewers.values()]
+      .map((entry) => entry.sample)
+      .filter((sample): sample is QualitySample => sample !== null);
+    return aggregateStats(samples);
   }
 
   get viewerIds(): string[] {
@@ -62,7 +93,14 @@ export class ViewerConnectionManager {
     if (!stream) throw new Error("cannot add a viewer before capture has started");
 
     const connection = this.#options.createPeerConnection();
-    const entry: ViewerEntry = { connection, stats: new StatsTracker(), quality: "reconnecting" };
+    // "send": this end of the connection only ever transmits video, so its
+    // frame rate and loss live in outbound-rtp and in the receiver's reports.
+    const entry: ViewerEntry = {
+      connection,
+      stats: new StatsTracker("send"),
+      quality: "reconnecting",
+      sample: null,
+    };
     this.#viewers.set(viewerId, entry);
     this.#notifyViewersChanged();
 
@@ -87,6 +125,9 @@ export class ViewerConnectionManager {
         connection.addTrack(track, stream);
       }
 
+      // Both of these have to happen before the offer exists. The offer is
+      // the only one this connection ever makes.
+      (this.#options.applyCodecPreferences ?? applyCodecPreferences)(connection);
       this.#applySendParameters(connection);
 
       const offer = await connection.createOffer();
@@ -152,10 +193,12 @@ export class ViewerConnectionManager {
       [...this.#viewers.entries()].map(async ([viewerId, entry]) => {
         try {
           const report = await entry.connection.getStats();
-          entry.quality = classifyQuality(
-            entry.stats.sample(report, entry.connection.iceConnectionState),
-          );
+          entry.sample = entry.stats.sample(report, entry.connection.iceConnectionState);
+          entry.quality = classifyQuality(entry.sample);
         } catch {
+          // Drop the reading rather than keep the last one: stale numbers on
+          // a dead connection read as a healthy share.
+          entry.sample = null;
           entry.quality = "reconnecting";
         }
         results.set(viewerId, entry.quality);
@@ -165,8 +208,21 @@ export class ViewerConnectionManager {
     return results;
   }
 
+  /**
+   * Re-aims every live sender at a new ceiling.
+   *
+   * This is a parameter change, not a renegotiation: no new offer, no new
+   * answer, and nobody watching loses their picture while it takes effect.
+   */
+  setEncoding(encoding: EncodingSettings): void {
+    this.#encoding = encoding;
+    for (const entry of this.#viewers.values()) {
+      this.#applySendParameters(entry.connection);
+    }
+  }
+
   #applySendParameters(connection: RTCPeerConnection): void {
-    const maxBitrate = this.#options.maxBitrateBps ?? DEFAULT_MAX_BITRATE_BPS;
+    const { maxBitrateBps, degradationPreference } = this.#encoding;
 
     for (const sender of connection.getSenders()) {
       if (sender.track?.kind !== "video") continue;
@@ -177,11 +233,9 @@ export class ViewerConnectionManager {
           ? parameters.encodings
           : [{}];
         for (const encoding of parameters.encodings) {
-          encoding.maxBitrate = maxBitrate;
+          encoding.maxBitrate = maxBitrateBps;
         }
-        // Screen content is unreadable when resolution is sacrificed, so drop
-        // frames instead of pixels when bandwidth gets tight.
-        parameters.degradationPreference = "maintain-resolution";
+        parameters.degradationPreference = degradationPreference;
         void sender.setParameters(parameters);
       } catch {
         // Unsupported parameters are not worth failing a session over; WebRTC

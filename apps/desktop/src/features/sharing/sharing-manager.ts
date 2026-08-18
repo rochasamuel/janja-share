@@ -1,6 +1,8 @@
 import type { IceServer, ServerMessage } from "@janja/signaling-protocol";
 import type { SignalingClient } from "../../services/signaling/signaling-client.js";
+import { QUALITY_PRESETS, type QualityProfile } from "../../services/settings.js";
 import type { ConnectionQuality } from "../../services/webrtc/connection-quality.js";
+import type { StreamStats } from "../../services/webrtc/stream-stats.js";
 import {
   CaptureCancelledError,
   onCaptureEnded,
@@ -9,7 +11,7 @@ import {
   type AudioSource,
   type CaptureOptions,
 } from "./screen-capture.js";
-import { ViewerConnectionManager } from "./viewer-connection-manager.js";
+import { ViewerConnectionManager, type EncodingSettings } from "./viewer-connection-manager.js";
 
 export type SharingState = "idle" | "starting" | "sharing" | "stopping" | "error";
 
@@ -24,13 +26,24 @@ export interface SharingSnapshot {
   /** A short sentence fit to show a person, or null. */
   message: string | null;
   quality: Map<string, ConnectionQuality>;
+  /** Every viewer's measurements folded into one, or null before the first poll. */
+  stats: StreamStats | null;
 }
 
 export interface SharingManagerOptions {
   signaling: SignalingClient;
   createPeerConnection: (iceServers: IceServer[]) => RTCPeerConnection;
   capture?: CaptureOptions;
+  /** Starting preset. Changed later with setQuality, including mid-share. */
+  quality?: QualityProfile;
   onChange?: (snapshot: SharingSnapshot) => void;
+}
+
+function encodingOf(profile: QualityProfile): EncodingSettings {
+  return {
+    maxBitrateBps: profile.maxBitrateBps,
+    degradationPreference: profile.degradationPreference,
+  };
 }
 
 /**
@@ -55,9 +68,12 @@ export class SharingManager {
   #stopAudio: (() => Promise<void>) | undefined;
   #message: string | null = null;
   #quality = new Map<string, ConnectionQuality>();
+  #profile: QualityProfile;
+  #stats: StreamStats | null = null;
 
   constructor(options: SharingManagerOptions) {
     this.#options = options;
+    this.#profile = options.quality ?? QUALITY_PRESETS.auto.profile;
   }
 
   get snapshot(): SharingSnapshot {
@@ -70,6 +86,7 @@ export class SharingManager {
       audioProcess: this.#audioProcess,
       message: this.#message,
       quality: new Map(this.#quality),
+      stats: this.#stats,
     };
   }
 
@@ -84,7 +101,13 @@ export class SharingManager {
     this.#setState("starting", null);
 
     try {
-      const capture = await startCapture(this.#options.capture);
+      const capture = await startCapture({
+        ...this.#options.capture,
+        width: this.#profile.width,
+        height: this.#profile.height,
+        frameRate: this.#profile.frameRate,
+        contentHint: this.#profile.contentHint,
+      });
       this.#stream = capture.stream;
       this.#audioSource = capture.audioSource;
       this.#audioProcess = capture.audioProcess ?? null;
@@ -109,7 +132,7 @@ export class SharingManager {
         this.#setState("idle", null);
         return;
       }
-      this.#setState("error", "Unable to capture your screen.");
+      this.#setState("error", "Não foi possível capturar a sua tela.");
     }
   }
 
@@ -133,6 +156,42 @@ export class SharingManager {
   async pollQuality(): Promise<void> {
     if (!this.#viewers || this.#state !== "sharing") return;
     this.#quality = await this.#viewers.pollQuality();
+    this.#stats = this.#viewers.stats;
+    this.#emit();
+  }
+
+  /**
+   * Switches preset, live if a share is running.
+   *
+   * Constraints and encoder parameters both change without renegotiating, so
+   * nobody watching loses their picture over a preference change. A preset
+   * chosen while idle simply waits for the next capture.
+   */
+  async setQuality(profile: QualityProfile): Promise<void> {
+    this.#profile = profile;
+    this.#viewers?.setEncoding(encodingOf(profile));
+
+    const track = this.#stream?.getVideoTracks()[0];
+    if (track) {
+      // Settable on a live track, and the encoder picks it up without any
+      // renegotiation — so switching to the game preset mid-session works.
+      track.contentHint = profile.contentHint;
+      try {
+        await track.applyConstraints({
+          // `ideal`, never `exact`, for the same reason as in startCapture: an
+          // exact demand a source cannot meet ends the track instead of
+          // adjusting it.
+          width: { ideal: profile.width },
+          height: { ideal: profile.height },
+          frameRate: { ideal: profile.frameRate },
+        });
+      } catch {
+        // Some capture sources refuse to be re-sized once running. The picture
+        // keeps its old dimensions; the bitrate ceiling still moved, and that
+        // is the larger of the two levers.
+      }
+    }
+
     this.#emit();
   }
 
@@ -146,6 +205,7 @@ export class SharingManager {
         this.#viewers = new ViewerConnectionManager({
           createPeerConnection: () => this.#options.createPeerConnection(this.#iceServers),
           send: (outbound) => this.#options.signaling.send(outbound),
+          encoding: encodingOf(this.#profile),
           onViewersChanged: () => this.#emit(),
           onError: () => this.#emit(),
         });
@@ -187,7 +247,7 @@ export class SharingManager {
         // ROOM_FULL is the server refusing a viewer, not a fault in this
         // session, so it must never stop the people already watching.
         if (message.code === "ROOM_FULL") return;
-        this.#setState("error", "Something went wrong with the connection.");
+        this.#setState("error", "Algo deu errado na conexão.");
         return;
       }
 
@@ -215,6 +275,7 @@ export class SharingManager {
     this.#stopAudio = undefined;
 
     this.#quality.clear();
+    this.#stats = null;
     this.#audioSource = "none";
     this.#audioProcess = null;
   }
@@ -237,8 +298,8 @@ function audioMessage(source: AudioSource, process: string | null): string | nul
       // which app, and a banner for success is noise.
       return null;
     case "system":
-      return "Sharing the whole computer's sound — anyone in a voice call with you will be heard too.";
+      return "Compartilhando o som do computador inteiro — quem estiver numa chamada de voz com você também vai ser ouvido.";
     case "none":
-      return "Sharing without sound. Stop and share again, ticking the audio option in the Windows picker.";
+      return "Compartilhando sem som. Pare e comece de novo, marcando a opção de áudio no seletor do Windows.";
   }
 }

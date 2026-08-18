@@ -1,21 +1,30 @@
-# janja-share
+# Janja Share
 
 A small Windows desktop app for sharing your screen with a handful of friends.
 Video and audio travel peer-to-peer over WebRTC. The server only introduces
 peers to each other; it never carries the stream.
 
-**Status:** signaling foundation complete and tested. The desktop app is not
-built yet — it is gated on the WebView2 capture spike (see below).
+The interface is in Brazilian Portuguese; the code and these notes are in
+English.
+
+**Status:** signaling and the desktop app both work. Per-app audio capture,
+quality presets and live connection statistics are in.
 
 ## Layout
 
 ```
+apps/desktop/                  Tauri + React tray popover
 apps/signaling/                Node WebSocket signaling server
 packages/signaling-protocol/   wire types shared by server and client
 spikes/capture-probe/          throwaway WebView2 capture probe
-infra/coturn/                  TURN relay (not built yet)
+infra/coturn/                  TURN relay, for the VPS deployment
+scripts/make-icons.py          redraws every app and tray icon
+scripts/tunnel.sh              temporary public address via Cloudflare
 docs/superpowers/              design and implementation plans
 ```
+
+To put a build in a friend's hands, see
+[docs/enviando-para-um-amigo.md](docs/enviando-para-um-amigo.md).
 
 ## Running the signaling server
 
@@ -41,8 +50,9 @@ time rather than loudly at boot.
 ## Tests
 
 ```bash
-pnpm test          # 58 tests
+pnpm test          # 216 tests
 pnpm typecheck
+bash scripts/check-rust.sh   # drives the Windows cargo over interop
 ```
 
 The signaling server is covered end to end against a real WebSocket server:
@@ -66,6 +76,17 @@ pnpm install
 ```
 
 Requires Rust on Windows: `winget install Rustlang.Rustup`.
+
+The signaling address is compiled in, so set it before building:
+
+```powershell
+cd apps\desktop
+$env:VITE_SIGNALING_URL = "wss://your-server"
+pnpm tauri build
+```
+
+`pnpm dev:tunnel` prints that address for a throwaway Cloudflare tunnel, along
+with the exact build command.
 
 ## Why P2P, and what it costs
 

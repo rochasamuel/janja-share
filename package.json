@@ -10,6 +10,7 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "dev:signal": "pnpm --filter @janja/signaling dev",
+    "dev:tunnel": "bash scripts/tunnel.sh",
     "dev:turn": "docker compose -f infra/coturn/docker-compose.yml up",
     "sync:win": "bash scripts/sync-windows.sh"
   },

@@ -26,6 +26,12 @@ export interface CaptureOptions {
   height?: number;
   frameRate?: number;
   getDisplayMedia?: (constraints: DisplayMediaStreamOptions) => Promise<MediaStream>;
+  /**
+   * What the encoder should protect. "detail" for code, "motion" for a game —
+   * asking an encoder to preserve every edge of a scene that changes
+   * completely each frame is the most expensive thing you can request.
+   */
+  contentHint?: "detail" | "motion" | "text";
   /** Set false to skip native per-app capture and take the system mix. */
   preferAppAudio?: boolean;
   /** Injected in tests; defaults to the real native bridge. */
@@ -90,10 +96,11 @@ export async function startCapture(options: CaptureOptions = {}): Promise<Captur
     throw new CaptureUnavailableError("capture returned no video");
   }
 
-  // Screen content is text and edges, not motion. This tells the encoder to
-  // protect sharpness rather than smoothness, which is the whole difference
-  // between readable code on the other end and a blurry mess.
-  videoTrack.contentHint = "detail";
+  // Screen content is usually text and edges rather than motion, and telling
+  // the encoder to protect sharpness is the whole difference between readable
+  // code on the other end and a blurry mess. A game is the exception, and the
+  // quality preset is what says so.
+  videoTrack.contentHint = options.contentHint ?? "detail";
 
   return attachAudio(stream, videoTrack, options);
 }

@@ -145,31 +145,31 @@ function describe(track: MediaStreamTrack): TrackReport {
 }
 
 const ENGINE_LABEL: Record<Engine, string> = {
-  webview2: "WebView2 (correct host)",
-  chrome: "Chrome — NOT the app",
-  firefox: "Firefox — NOT the app",
-  webkit: "WebKit — NOT the app",
-  unknown: "unknown — NOT the app",
+  webview2: "WebView2 (host correto)",
+  chrome: "Chrome — NÃO é o app",
+  firefox: "Firefox — NÃO é o app",
+  webkit: "WebKit — NÃO é o app",
+  unknown: "desconhecido — NÃO é o app",
 };
 
 /** Human-readable summary for the diagnostics log and for RESULTS.md. */
 export function summarize(result: ProbeResult): string {
   const header = result.trustworthy
-    ? `engine:            ${ENGINE_LABEL[result.engine]}`
+    ? `motor:             ${ENGINE_LABEL[result.engine]}`
     : [
-        `!! ENGINE:         ${ENGINE_LABEL[result.engine]}`,
-        `!! These numbers do not answer anything. Run the check inside the`,
-        `!! ScreenShare window, not in a browser tab.`,
+        `!! MOTOR:          ${ENGINE_LABEL[result.engine]}`,
+        `!! Estes números não respondem nada. Rode o teste dentro da janela`,
+        `!! do Janja Share, não numa aba de navegador.`,
       ].join("\n");
 
   if (!result.ok) {
     const lines = [
       header,
       ``,
-      `FAILED: ${result.errorName}: ${result.errorMessage}`,
+      `FALHOU: ${result.errorName}: ${result.errorMessage}`,
       result.permissionLikelyDenied
-        ? "Looks like the host never granted DisplayCapture, rather than you pressing cancel."
-        : "The picker appeared but capture did not start.",
+        ? "Parece que o host nunca concedeu DisplayCapture, e não que você apertou cancelar."
+        : "O seletor apareceu, mas a captura não começou.",
     ];
     return lines.join("\n");
   }
@@ -177,15 +177,15 @@ export function summarize(result: ProbeResult): string {
   return [
     header,
     ``,
-    `picker shown:      yes`,
-    `video tracks:      ${result.video.length}`,
-    `audio tracks:      ${result.audio.length}${result.hasSystemAudio ? "" : "  <-- no system audio"}`,
-    `negotiated:        ${result.width ?? "?"}x${result.height ?? "?"} @ ${
+    `seletor exibido:   sim`,
+    `trilhas de vídeo:  ${result.video.length}`,
+    `trilhas de áudio:  ${result.audio.length}${result.hasSystemAudio ? "" : "  <-- sem som do sistema"}`,
+    `negociado:         ${result.width ?? "?"}x${result.height ?? "?"} @ ${
       result.frameRate ? Math.round(result.frameRate) : "?"
     } fps`,
-    `h264 available:    ${result.videoCodecs.some((c) => /h264/i.test(c)) ? "yes" : "no"}`,
+    `h264 disponível:   ${result.videoCodecs.some((c) => /h264/i.test(c)) ? "sim" : "não"}`,
     ``,
-    `video: ${result.video.map((t) => t.label).join(", ") || "none"}`,
-    `audio: ${result.audio.map((t) => t.label).join(", ") || "none"}`,
+    `vídeo: ${result.video.map((t) => t.label).join(", ") || "nenhuma"}`,
+    `áudio: ${result.audio.map((t) => t.label).join(", ") || "nenhuma"}`,
   ].join("\n");
 }

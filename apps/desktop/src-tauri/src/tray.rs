@@ -40,9 +40,9 @@ pub const TRAY_ACTION_EVENT: &str = "tray://action";
 /// The right-click menu stays deliberately thin. The panel itself is the
 /// interface now, so this only holds what you would want without opening it.
 fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Menu<R>> {
-    let open = MenuItemBuilder::with_id("open", "Open ScreenShare").build(app)?;
-    let stop = MenuItemBuilder::with_id("stop", "Stop sharing").build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
+    let open = MenuItemBuilder::with_id("open", "Abrir Janja Share").build(app)?;
+    let stop = MenuItemBuilder::with_id("stop", "Parar de compartilhar").build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "Sair").build(app)?;
 
     MenuBuilder::new(app)
         .items(&[&open])
@@ -58,7 +58,7 @@ pub fn init<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(Image::from_bytes(TrayStatus::Idle.icon_bytes())?)
-        .tooltip("ScreenShare — idle")
+        .tooltip("Janja Share — parado")
         .menu(&menu)
         // Left click opens the panel; the menu is on right click, which is
         // what a tray popover is expected to do.
@@ -132,20 +132,20 @@ pub fn apply_status<R: Runtime>(
     tray.set_icon(Some(Image::from_bytes(status.icon_bytes())?))?;
 
     let label = match status {
-        TrayStatus::Idle => "idle".to_string(),
+        TrayStatus::Idle => "parado".to_string(),
         TrayStatus::Sharing => detail
             .clone()
-            .map(|d| format!("sharing — {d}"))
-            .unwrap_or_else(|| "sharing".to_string()),
+            .map(|d| format!("compartilhando — {d}"))
+            .unwrap_or_else(|| "compartilhando".to_string()),
         TrayStatus::Watching => detail
             .clone()
-            .map(|d| format!("watching — {d}"))
-            .unwrap_or_else(|| "watching".to_string()),
+            .map(|d| format!("assistindo — {d}"))
+            .unwrap_or_else(|| "assistindo".to_string()),
         TrayStatus::Error => detail
             .clone()
-            .unwrap_or_else(|| "something went wrong".to_string()),
+            .unwrap_or_else(|| "algo deu errado".to_string()),
     };
-    tray.set_tooltip(Some(format!("ScreenShare — {label}")))?;
+    tray.set_tooltip(Some(format!("Janja Share — {label}")))?;
 
     Ok(())
 }
