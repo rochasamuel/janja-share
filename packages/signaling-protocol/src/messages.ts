@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { roomIdSchema } from "./room-id.js";
+import { channelIdSchema } from "./channel-id.js";
+import { MAX_NAME_LENGTH } from "./member-name.js";
 
 /**
  * SDP for a 1080p60 screen share with a handful of codecs runs a few kilobytes.
@@ -22,23 +23,45 @@ export type IceCandidateInit = z.infer<typeof iceCandidateInitSchema>;
 
 // --- client -> server ---------------------------------------------------------
 
+/**
+ * Twice the sanitized limit. The wire accepts a little slack so a name that
+ * merely needs trimming is cleaned rather than refused; `sanitizeName` is what
+ * actually decides.
+ */
+const rawNameSchema = z.string().min(1).max(MAX_NAME_LENGTH * 2);
+
 export const clientMessageSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("create-room") }),
-  z.object({ type: z.literal("join-room"), roomId: roomIdSchema }),
-  z.object({ type: z.literal("leave-room") }),
+  z.object({ type: z.literal("create-channel"), displayName: rawNameSchema }),
+  z.object({
+    type: z.literal("join-channel"),
+    channelId: channelIdSchema,
+    displayName: rawNameSchema,
+  }),
+  z.object({ type: z.literal("leave-channel") }),
+  z.object({ type: z.literal("publish-start") }),
+  z.object({ type: z.literal("publish-stop") }),
+  z.object({ type: z.literal("watch"), publisherId: sessionIdSchema }),
+  z.object({ type: z.literal("unwatch"), publisherId: sessionIdSchema }),
   z.object({
     type: z.literal("offer"),
     targetId: sessionIdSchema,
+    // Which stream this describes. Two members watching each other means two
+    // connections between the same pair, and targetId alone cannot tell them
+    // apart. The publisher's own session id is the id: no new space to
+    // generate, and nothing to garbage-collect.
+    publisherId: sessionIdSchema,
     sdp: z.string().max(MAX_SDP_BYTES),
   }),
   z.object({
     type: z.literal("answer"),
     targetId: sessionIdSchema,
+    publisherId: sessionIdSchema,
     sdp: z.string().max(MAX_SDP_BYTES),
   }),
   z.object({
     type: z.literal("ice-candidate"),
     targetId: sessionIdSchema,
+    publisherId: sessionIdSchema,
     candidate: iceCandidateInitSchema,
   }),
 ]);
@@ -49,10 +72,13 @@ export type ClientMessageType = ClientMessage["type"];
 // --- server -> client ---------------------------------------------------------
 
 export type ErrorCode =
-  | "ROOM_NOT_FOUND"
-  | "ROOM_FULL"
-  | "ALREADY_IN_ROOM"
-  | "NOT_IN_ROOM"
+  | "CHANNEL_NOT_FOUND"
+  | "CHANNEL_FULL"
+  | "PUBLISHER_FULL"
+  | "ALREADY_WATCHING"
+  | "NOT_PUBLISHING"
+  | "ALREADY_IN_CHANNEL"
+  | "NOT_IN_CHANNEL"
   | "INVALID_MESSAGE"
   | "RATE_LIMITED"
   | "NOT_AUTHORIZED"
@@ -64,29 +90,42 @@ export interface IceServer {
   credential?: string;
 }
 
-export type ViewerLeftReason = "left" | "disconnected";
+/** One person in a channel, as everyone else sees them. */
+export interface Member {
+  id: string;
+  name: string;
+  publishing: boolean;
+}
+
+export type MemberLeftReason = "left" | "disconnected";
 
 export type ServerMessage =
   | {
-      type: "room-created";
-      roomId: string;
+      type: "channel-joined";
+      channelId: string;
       sessionId: string;
+      /** May differ from what was asked for: the server deduplicates names. */
+      displayName: string;
+      /** Everyone already here, excluding the joiner. */
+      members: Member[];
       iceServers: IceServer[];
-      maxViewers: number;
+      maxViewersPerPublisher: number;
     }
+  | { type: "member-joined"; member: Member }
+  | { type: "member-left"; memberId: string; reason: MemberLeftReason }
+  | { type: "member-publishing"; memberId: string; publishing: boolean }
+  /** Someone clicked you. Build a connection and offer. */
+  | { type: "watch-request"; fromId: string }
+  /** They stopped. Tear that one connection down. */
+  | { type: "unwatch"; fromId: string }
+  | { type: "offer"; fromId: string; publisherId: string; sdp: string }
+  | { type: "answer"; fromId: string; publisherId: string; sdp: string }
   | {
-      type: "room-joined";
-      roomId: string;
-      sessionId: string;
-      sharerId: string;
-      iceServers: IceServer[];
+      type: "ice-candidate";
+      fromId: string;
+      publisherId: string;
+      candidate: IceCandidateInit;
     }
-  | { type: "viewer-joined"; viewerId: string }
-  | { type: "viewer-left"; viewerId: string; reason: ViewerLeftReason }
-  | { type: "offer"; fromId: string; sdp: string }
-  | { type: "answer"; fromId: string; sdp: string }
-  | { type: "ice-candidate"; fromId: string; candidate: IceCandidateInit }
-  | { type: "room-ended"; reason: "sharer-left" }
   | { type: "error"; code: ErrorCode; message: string };
 
 export type ServerMessageType = ServerMessage["type"];
