@@ -41,6 +41,16 @@ export function hidePanel(): Promise<void> {
   return invokeSafely("hide_panel");
 }
 
+/**
+ * Brings the panel up from wherever the user was.
+ *
+ * Used by the global shortcut when there is no channel to share into: doing
+ * nothing would be indistinguishable from a shortcut that is not working.
+ */
+export function showPanel(): Promise<void> {
+  return invokeSafely("show_panel");
+}
+
 export function quitApp(): Promise<void> {
   return invokeSafely("quit_app");
 }

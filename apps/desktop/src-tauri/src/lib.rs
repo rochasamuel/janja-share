@@ -1,6 +1,7 @@
 #[cfg(target_os = "windows")]
 mod app_audio;
 mod popover;
+mod shortcut;
 mod sources;
 mod tray;
 mod window_info;
@@ -80,6 +81,16 @@ fn set_picker_mode(
 #[tauri::command]
 fn hide_panel(window: tauri::WebviewWindow) {
     let _ = window.hide();
+}
+
+/// Brings the panel up from wherever the user was.
+///
+/// Needed by the global shortcut: pressed with no channel joined there is
+/// nothing to share into, and the honest answer is to show the panel rather
+/// than to do nothing and look broken.
+#[tauri::command]
+fn show_panel(app: tauri::AppHandle) {
+    tray::show_main_window(&app);
 }
 
 /// The running per-application audio capture, if any.
@@ -202,6 +213,7 @@ pub fn run() {
     }));
 
     builder
+        .plugin(shortcut::plugin())
         .manage(AutoHide(AtomicBool::new(true)))
         .manage(AudioCapture::default())
         .manage(PanelGeometry::default())
@@ -210,6 +222,7 @@ pub fn run() {
             set_auto_hide,
             set_picker_mode,
             hide_panel,
+            show_panel,
             describe_window,
             list_capture_sources,
             start_app_audio,
@@ -219,6 +232,13 @@ pub fn run() {
         ])
         .setup(|app| {
             tray::init(app)?;
+
+            // Survivable: another application may already own Ctrl+Alt+S, and
+            // refusing to start over a hotkey would be worse than starting
+            // without it.
+            if let Err(message) = shortcut::register(app.handle()) {
+                eprintln!("janja: {message}");
+            }
 
             if let Some(window) = app.get_webview_window("main") {
                 popover::apply_blur(&window);

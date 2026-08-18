@@ -60,11 +60,14 @@ export function ChannelScreen({
               label={`Transmitindo para ${viewerCount} de ${sharing.maxViewers}`}
               onClick={onShareDetails}
             />
+            {/* The global chord, not the in-app one. Ctrl+. still works, but
+                the hint is worth spending on the shortcut that reaches a
+                fullscreen game — the only place stopping is actually hard. */}
             <Row
               icon="stop"
               tone="danger"
               label="Parar de compartilhar"
-              shortcut="Ctrl ."
+              shortcut="Ctrl Alt S"
               onClick={onStopPublishing}
             />
           </>
@@ -72,7 +75,7 @@ export function ChannelScreen({
           <Row
             icon="share"
             label="Compartilhar minha tela"
-            shortcut="Ctrl S"
+            shortcut="Ctrl Alt S"
             onClick={onPublish}
           />
         )}

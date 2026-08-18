@@ -10,7 +10,8 @@ import { ShareScreen } from "./features/sharing/ShareScreen.js";
 import { WatchScreen } from "./features/viewing/WatchScreen.js";
 import { useSignaling } from "./hooks/use-signaling.js";
 import { useChannel } from "./hooks/use-channel.js";
-import { hidePanel, quitApp, setAutoHide } from "./services/panel.js";
+import { hidePanel, quitApp, setAutoHide, showPanel } from "./services/panel.js";
+import { shareShortcutAction } from "./services/share-shortcut.js";
 import { setTrayStatus } from "./services/tray-status.js";
 import type { SignalingState } from "./services/signaling/signaling-client.js";
 
@@ -110,6 +111,52 @@ export function App() {
 
     return () => dispose?.();
   }, [stopPublishing]);
+
+  /**
+   * The global shortcut, which is the only one that reaches a fullscreen game.
+   *
+   * Every other shortcut in this file needs the panel focused, and focusing
+   * the panel is what minimises the window the person wanted to share.
+   */
+  useEffect(() => {
+    let dispose: (() => void) | undefined;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const off = await listen("shortcut://share-toggle", () => {
+          switch (shareShortcutAction({ live, inChannel })) {
+            case "stop":
+              // No panel: stopping from inside a game must not drag the person
+              // out of it, which is the whole point of the shortcut.
+              void stopPublishing();
+              return;
+            case "start":
+              setScreen("share");
+              void startPublishing();
+              return;
+            case "needs-channel":
+              void showPanel();
+              setScreen("home");
+              return;
+          }
+        });
+
+        // This effect re-runs whenever live or inChannel change, so a
+        // teardown can land while listen is still resolving.
+        if (cancelled) off();
+        else dispose = off;
+      } catch {
+        // Running in a plain browser: no shortcut to listen to.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      dispose?.();
+    };
+  }, [live, inChannel, startPublishing, stopPublishing]);
 
   // The shortcut hints on each row have to actually do something, or they are
   // decoration pretending to be an affordance.
