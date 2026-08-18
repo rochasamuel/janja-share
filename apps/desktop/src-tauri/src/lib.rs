@@ -168,6 +168,19 @@ fn describe_window(label: String) -> Option<window_info::WindowInfo> {
     window_info::parse_window_label(&label).and_then(window_info::describe)
 }
 
+/// The name the rest of the channel will see.
+///
+/// `COMPUTERNAME` is what Windows itself shows in Settings, and it is what the
+/// group already uses to refer to each other's machines. Falling back to
+/// `HOSTNAME` keeps a non-Windows dev build working; an empty result is handled
+/// on the TypeScript side, which has a friendlier default than Rust does.
+#[tauri::command]
+fn machine_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_default()
+}
+
 /// Sharing must survive the panel closing, so quitting has to be explicit.
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
@@ -201,7 +214,8 @@ pub fn run() {
             list_capture_sources,
             start_app_audio,
             stop_app_audio,
-            quit_app
+            quit_app,
+            machine_name
         ])
         .setup(|app| {
             tray::init(app)?;
