@@ -18,6 +18,14 @@ export interface EncodingSettings {
 }
 
 export interface ViewerConnectionManagerOptions {
+  /**
+   * Our own session id, stamped on everything we send.
+   *
+   * Two members can watch each other, which is two peer connections between
+   * the same pair going opposite ways. Without this the far end cannot tell
+   * which of the two an offer belongs to.
+   */
+  publisherId: string;
   createPeerConnection: PeerConnectionFactory;
   send: (message: ClientMessage) => void;
   encoding?: EncodingSettings;
@@ -110,6 +118,7 @@ export class ViewerConnectionManager {
         this.#safeSend({
           type: "ice-candidate",
           targetId: viewerId,
+          publisherId: this.#options.publisherId,
           candidate: event.candidate.toJSON() as IceCandidateInit,
         });
       };
@@ -133,7 +142,12 @@ export class ViewerConnectionManager {
       const offer = await connection.createOffer();
       await connection.setLocalDescription(offer);
 
-      this.#safeSend({ type: "offer", targetId: viewerId, sdp: offer.sdp ?? "" });
+      this.#safeSend({
+        type: "offer",
+        targetId: viewerId,
+        publisherId: this.#options.publisherId,
+        sdp: offer.sdp ?? "",
+      });
     } catch (error) {
       this.removeViewer(viewerId);
       this.#options.onError?.(viewerId, error);

@@ -109,12 +109,15 @@ function fakeStream(): MediaStream {
   return { getTracks: () => tracks } as unknown as MediaStream;
 }
 
+const PUBLISHER = "publisher-1";
+
 function setup() {
   const sent: ClientMessage[] = [];
   const errors: { viewerId: string; error: unknown }[] = [];
   const viewerSnapshots: string[][] = [];
 
   const manager = new ViewerConnectionManager({
+    publisherId: PUBLISHER,
     createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
     send: (message) => sent.push(message),
     onViewersChanged: (ids) => viewerSnapshots.push(ids),
@@ -138,7 +141,25 @@ describe("ViewerConnectionManager", () => {
     await manager.addViewer("viewer-1");
 
     expect(pcFor(0).tracks).toHaveLength(2);
-    expect(sent).toEqual([{ type: "offer", targetId: "viewer-1", sdp: "v=0 offer" }]);
+    expect(sent).toEqual([
+      { type: "offer", targetId: "viewer-1", publisherId: PUBLISHER, sdp: "v=0 offer" },
+    ]);
+  });
+
+  it("stamps its own publisherId on every message it sends", async () => {
+    const { manager, sent } = setup();
+    await manager.addViewer("viewer-1");
+
+    expect(sent.find((message) => message.type === "offer")).toMatchObject({
+      targetId: "viewer-1",
+      publisherId: PUBLISHER,
+    });
+
+    pcFor(0).emitCandidate({ candidate: "candidate:1" });
+    expect(sent.find((message) => message.type === "ice-candidate")).toMatchObject({
+      targetId: "viewer-1",
+      publisherId: PUBLISHER,
+    });
   });
 
   it("builds one connection per viewer", async () => {
@@ -173,7 +194,12 @@ describe("ViewerConnectionManager", () => {
     pcFor(1).emitCandidate({ candidate: "candidate:2" });
 
     expect(sent).toEqual([
-      { type: "ice-candidate", targetId: "viewer-2", candidate: { candidate: "candidate:2" } },
+      {
+        type: "ice-candidate",
+        targetId: "viewer-2",
+        publisherId: PUBLISHER,
+        candidate: { candidate: "candidate:2" },
+      },
     ]);
   });
 
@@ -215,6 +241,7 @@ describe("ViewerConnectionManager", () => {
       // hardware. Six software encodes is what eats the CPU.
       const applied: string[] = [];
       const manager = new ViewerConnectionManager({
+        publisherId: PUBLISHER,
         createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
         send: () => {},
         applyCodecPreferences: () => {
@@ -233,6 +260,7 @@ describe("ViewerConnectionManager", () => {
     it("does so for every viewer, not just the first", async () => {
       let count = 0;
       const manager = new ViewerConnectionManager({
+        publisherId: PUBLISHER,
         createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
         send: () => {},
         applyCodecPreferences: () => {
@@ -251,6 +279,7 @@ describe("ViewerConnectionManager", () => {
   describe("encoding settings", () => {
     it("uses the ceiling it was built with", async () => {
       const manager = new ViewerConnectionManager({
+        publisherId: PUBLISHER,
         createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
         send: () => {},
         encoding: { maxBitrateBps: 2_500_000, degradationPreference: "maintain-framerate" },
@@ -407,6 +436,7 @@ describe("ViewerConnectionManager", () => {
     it("cleans up the failed viewer when negotiation throws", async () => {
       const sent: ClientMessage[] = [];
       const manager = new ViewerConnectionManager({
+        publisherId: PUBLISHER,
         createPeerConnection: () => {
           const pc = new FakePeerConnection();
           pc.failOn = "createOffer";
@@ -423,6 +453,7 @@ describe("ViewerConnectionManager", () => {
 
     it("survives the signaling socket being closed mid-negotiation", async () => {
       const manager = new ViewerConnectionManager({
+        publisherId: PUBLISHER,
         createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
         send: () => {
           throw new Error("socket is not connected");
