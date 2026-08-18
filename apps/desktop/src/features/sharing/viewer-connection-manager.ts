@@ -57,6 +57,28 @@ interface ViewerEntry {
  */
 const SCALE_FOR: Record<ViewSize, number> = { panel: 3, fullscreen: 1 };
 
+/**
+ * The floor under a scaled ceiling.
+ *
+ * Below this, screen text starts falling apart at any resolution, and the
+ * ceiling stops being a limit and becomes a straitjacket.
+ */
+const MIN_BITRATE_BPS = 500_000;
+
+/**
+ * The ceiling for one viewer, scaled to the picture it is actually being sent.
+ *
+ * Bitrate demand tracks pixel count, and a third of the width is a ninth of
+ * the area. Leaving the full-screen ceiling in place for a panel viewer would
+ * not save the bandwidth the scaling was for: congestion control probes upward
+ * for as long as the link allows, and the encoder would happily spend eight
+ * megabits producing a near-lossless 640x360.
+ */
+function ceilingFor(maxBitrateBps: number, size: ViewSize): number {
+  const scale = SCALE_FOR[size];
+  return Math.max(MIN_BITRATE_BPS, Math.round(maxBitrateBps / (scale * scale)));
+}
+
 const DEFAULT_ENCODING: EncodingSettings = {
   maxBitrateBps: 8_000_000,
   // Screen content is unreadable when resolution is sacrificed, so drop frames
@@ -275,7 +297,7 @@ export class ViewerConnectionManager {
           ? parameters.encodings
           : [{}];
         for (const encoding of parameters.encodings) {
-          encoding.maxBitrate = maxBitrateBps;
+          encoding.maxBitrate = ceilingFor(maxBitrateBps, size);
           encoding.scaleResolutionDownBy = SCALE_FOR[size];
         }
         parameters.degradationPreference = degradationPreference;

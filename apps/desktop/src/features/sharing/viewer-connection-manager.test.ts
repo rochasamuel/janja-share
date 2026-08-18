@@ -228,7 +228,9 @@ describe("ViewerConnectionManager", () => {
     await manager.addViewer("viewer-1");
 
     const parameters = pcFor(0).parametersOfVideoSender();
-    expect(parameters.encodings?.[0]?.maxBitrate).toBe(8_000_000);
+    // A new viewer is in the panel, so the default ceiling arrives scaled to
+    // the picture it is actually being sent.
+    expect(parameters.encodings?.[0]?.maxBitrate).toBe(Math.round(8_000_000 / 9));
     expect(parameters.degradationPreference).toBe("maintain-resolution");
   });
 
@@ -286,6 +288,9 @@ describe("ViewerConnectionManager", () => {
       });
       manager.setStream(fakeStream());
       await manager.addViewer("viewer-1");
+      // Fullscreen so this stays a test of the ceiling it was built with,
+      // rather than of the scaling arithmetic, which has its own tests.
+      manager.setViewerSize("viewer-1", "fullscreen");
 
       const parameters = pcFor(0).parametersOfVideoSender();
       expect(parameters.encodings?.[0]?.maxBitrate).toBe(2_500_000);
@@ -298,6 +303,8 @@ describe("ViewerConnectionManager", () => {
       const { manager, sent } = setup();
       await manager.addViewer("viewer-1");
       await manager.addViewer("viewer-2");
+      manager.setViewerSize("viewer-1", "fullscreen");
+      manager.setViewerSize("viewer-2", "fullscreen");
       const offersBefore = sent.filter((message) => message.type === "offer").length;
 
       manager.setEncoding({
@@ -320,6 +327,7 @@ describe("ViewerConnectionManager", () => {
         degradationPreference: "maintain-resolution",
       });
       await manager.addViewer("viewer-1");
+      manager.setViewerSize("viewer-1", "fullscreen");
 
       expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(2_500_000);
     });
@@ -358,7 +366,8 @@ describe("ViewerConnectionManager", () => {
       const second = pcFor(1).parametersOfVideoSender().encodings?.[0];
       expect(first?.scaleResolutionDownBy).toBe(3);
       expect(second?.scaleResolutionDownBy).toBe(1);
-      expect(first?.maxBitrate).toBe(1_000_000);
+      // The ceiling follows the scale: a ninth of 1 Mbps is under the floor.
+      expect(first?.maxBitrate).toBe(500_000);
       expect(second?.maxBitrate).toBe(1_000_000);
     });
 
@@ -370,6 +379,56 @@ describe("ViewerConnectionManager", () => {
       await manager.addViewer("viewer-2");
 
       expect(pcFor(1).parametersOfVideoSender().encodings?.[0]?.scaleResolutionDownBy).toBe(3);
+    });
+
+    it("scales the ceiling down with the picture, not just the pixels", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+
+      // A third of the width is a ninth of the area, and a ceiling left at the
+      // full-screen figure would let congestion control spend it all on a
+      // near-lossless 640x360.
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(
+        Math.round(8_000_000 / 9),
+      );
+    });
+
+    it("gives a fullscreen viewer the whole ceiling", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+
+      manager.setViewerSize("viewer-1", "fullscreen");
+
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(8_000_000);
+    });
+
+    it("never drops the ceiling below what screen text needs", async () => {
+      const manager = new ViewerConnectionManager({
+        publisherId: PUBLISHER,
+        createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+        send: () => {},
+        // A ninth of this is 111 kbps, which is not a ceiling but a straitjacket.
+        encoding: { maxBitrateBps: 1_000_000, degradationPreference: "maintain-resolution" },
+      });
+      manager.setStream(fakeStream());
+      await manager.addViewer("viewer-1");
+
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(500_000);
+    });
+
+    it("re-aims the ceiling too when the preset changes", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+      await manager.addViewer("viewer-2");
+      manager.setViewerSize("viewer-2", "fullscreen");
+
+      manager.setEncoding({
+        maxBitrateBps: 9_000_000,
+        degradationPreference: "maintain-resolution",
+      });
+
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(1_000_000);
+      expect(pcFor(1).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(9_000_000);
     });
 
     it("ignores a size for a viewer that has already gone", () => {

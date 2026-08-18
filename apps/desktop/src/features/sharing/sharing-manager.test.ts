@@ -148,9 +148,12 @@ describe("SharingManager quality", () => {
   });
 
   it("hands the preset's ceiling to each viewer connection", async () => {
-    const { goLive, addWatcher } = setup(QUALITY_PRESETS.smooth.profile);
+    const { manager, goLive, addWatcher } = setup(QUALITY_PRESETS.smooth.profile);
     await goLive();
     await addWatcher("viewer-1");
+    // Fullscreen so this stays about the preset reaching the connection. What
+    // the panel scales it down to is tested where that arithmetic lives.
+    manager.setViewerSize("viewer-1", "fullscreen");
 
     expect(pcFor(0).parameters.encodings?.[0]?.maxBitrate).toBe(12_000_000);
     expect(pcFor(0).parameters.degradationPreference).toBe("maintain-framerate");
@@ -171,6 +174,7 @@ describe("SharingManager quality", () => {
     const { manager, goLive, addWatcher } = setup();
     await goLive();
     await addWatcher("viewer-1");
+    manager.setViewerSize("viewer-1", "fullscreen");
     expect(pcFor(0).parameters.encodings?.[0]?.maxBitrate).toBe(8_000_000);
 
     await manager.setQuality(QUALITY_PRESETS.thrifty.profile);
