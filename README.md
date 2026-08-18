@@ -1,14 +1,16 @@
 # Janja Share
 
-A small Windows desktop app for sharing your screen with a handful of friends.
-Video and audio travel peer-to-peer over WebRTC. The server only introduces
-peers to each other; it never carries the stream.
+A small Windows desktop app for watching each other's screens. A handful of
+friends join a **channel** with a six-character code; any of them can share a
+screen, and each of them picks whose screen to watch. Video and audio travel
+peer-to-peer over WebRTC. The server only introduces peers to each other; it
+never carries the stream.
 
 The interface is in Brazilian Portuguese; the code and these notes are in
 English.
 
-**Status:** signaling and the desktop app both work. Per-app audio capture,
-quality presets and live connection statistics are in.
+**Status:** signaling and the desktop app both work. Channels, per-app audio
+capture, quality presets and live connection statistics are in.
 
 ## Layout
 
@@ -50,13 +52,13 @@ time rather than loudly at boot.
 ## Tests
 
 ```bash
-pnpm test          # 216 tests
+pnpm test          # 289 tests
 pnpm typecheck
 bash scripts/check-rust.sh   # drives the Windows cargo over interop
 ```
 
 The signaling server is covered end to end against a real WebSocket server:
-room lifecycle, the viewer cap, authorization between peers, disconnect
+channel lifecycle, both caps, authorization between peers, disconnect
 handling, malformed input, and rate limiting.
 
 ## Building the Windows app
@@ -90,9 +92,13 @@ with the exact build command.
 
 ## Why P2P, and what it costs
 
-The sharer sends one copy of the stream to each viewer. Six viewers at 6 Mbps
-is roughly 36 Mbps of upload from the sharer's connection — that ceiling, not
-CPU, is what limits viewer count. WebRTC lowers quality as upload saturates
+Joining a channel builds nothing. A peer connection appears only when someone
+clicks a member who is sharing, which is what keeps a channel of eight people
+from becoming fifty-six connections.
+
+Each publisher sends one copy of its stream to each of its viewers. Six viewers
+at 6 Mbps is roughly 36 Mbps of upload from that one connection — that ceiling,
+not CPU, is what limits viewer count. WebRTC lowers quality as upload saturates
 rather than dropping viewers. Moving past it means an SFU, which this MVP
 deliberately does not build, but the WebRTC layer stays modular enough to add
 one later.

@@ -119,9 +119,9 @@ describe("SignalingClient", () => {
 
     client.connect();
     latest().open();
-    latest().deliver({ type: "viewer-joined", viewerId: "v1" });
+    latest().deliver({ type: "watch-request", fromId: "v1" });
 
-    expect(received).toEqual([{ type: "viewer-joined", viewerId: "v1" }]);
+    expect(received).toEqual([{ type: "watch-request", fromId: "v1" }]);
   });
 
   it("ignores an unparseable frame instead of dropping the session", () => {
