@@ -48,6 +48,14 @@ export class ViewingManager {
   #state: ViewingState = "idle";
   #publisherId: string | null = null;
   #publisherName: string | null = null;
+  /**
+   * Whether the server still holds a subscription for us.
+   *
+   * It does not survive the publisher stopping or leaving — the server drops
+   * it on its own — and unwatching one that is already gone earns a refusal
+   * the person did nothing to deserve.
+   */
+  #subscribed = false;
   #quality: ConnectionQuality = "reconnecting";
   #streamStats: StreamStats | null = null;
   #message: string | null = null;
@@ -85,6 +93,7 @@ export class ViewingManager {
 
     try {
       this.#options.signaling.send({ type: "watch", publisherId });
+      this.#subscribed = true;
     } catch {
       this.#setState("error", "Sem conexão com o servidor.");
     }
@@ -92,7 +101,7 @@ export class ViewingManager {
 
   stop(): void {
     const publisherId = this.#publisherId;
-    if (publisherId !== null) {
+    if (publisherId !== null && this.#subscribed) {
       try {
         this.#options.signaling.send({ type: "unwatch", publisherId });
       } catch {
@@ -273,6 +282,7 @@ export class ViewingManager {
       }
     }
     this.#connection = undefined;
+    this.#subscribed = false;
     this.#pendingCandidates = [];
     this.#stats.reset();
     this.#quality = "reconnecting";
@@ -291,8 +301,14 @@ export class ViewingManager {
   }
 }
 
-/** Turns a server refusal into something a person can act on. */
-export function watchErrorMessage(code: string, fallback: string): string {
+/**
+ * Turns a server refusal into something a person can act on.
+ *
+ * The server's own text is never shown. It is written for whoever is reading
+ * the logs — in English, about sessions and peers — and this panel is in
+ * Portuguese, talking about people and screens.
+ */
+export function watchErrorMessage(code: string): string {
   switch (code) {
     case "NOT_PUBLISHING":
       return "Essa pessoa parou de compartilhar.";
@@ -301,6 +317,6 @@ export function watchErrorMessage(code: string, fallback: string): string {
     case "ALREADY_WATCHING":
       return "Você só pode assistir a uma transmissão por vez.";
     default:
-      return fallback;
+      return "Não foi possível abrir essa transmissão.";
   }
 }

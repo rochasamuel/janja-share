@@ -226,12 +226,15 @@ export async function createSignalingServer(
       }
 
       case "unwatch": {
+        // Idempotent, and deliberately silent when there was nothing to drop.
+        // Not watching someone is the outcome this asked for, not a failure:
+        // the publisher may have stopped a moment earlier, in which case the
+        // server already tore the subscription down and the viewer is being
+        // told off for a state it did not choose.
         const result = channels.unwatch(session.id, message.publisherId);
-        if (!result.ok) {
-          sendError(session, result.code, "You are not watching that member.");
-          return;
+        if (result.ok) {
+          sendTo(result.publisherId, { type: "unwatch", fromId: session.id });
         }
-        sendTo(result.publisherId, { type: "unwatch", fromId: session.id });
         return;
       }
 

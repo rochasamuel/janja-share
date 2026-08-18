@@ -295,4 +295,38 @@ describe("ViewingManager", () => {
     await deliver({ type: "member-left", memberId: "publisher-2", reason: "left" });
     expect(manager.snapshot.state).toBe("connecting");
   });
+
+  it("does not unwatch a publisher who already stopped", async () => {
+    const { manager, sent, deliver } = setup();
+    manager.watch(PUBLISHER, "PC-SAM");
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
+    await deliver({ type: "member-publishing", memberId: PUBLISHER, publishing: false });
+    sent.length = 0;
+
+    // The server dropped the subscription itself. Asking it to drop one that
+    // is already gone earns a refusal the person did nothing to deserve, and
+    // it surfaced as an error banner on the way back to the channel.
+    manager.stop();
+    expect(sent).toEqual([]);
+    expect(manager.snapshot.state).toBe("idle");
+  });
+
+  it("does not unwatch a publisher who left the channel", async () => {
+    const { manager, sent, deliver } = setup();
+    manager.watch(PUBLISHER, "PC-SAM");
+    await deliver({ type: "member-left", memberId: PUBLISHER, reason: "disconnected" });
+    sent.length = 0;
+
+    manager.stop();
+    expect(sent).toEqual([]);
+  });
+
+  it("still unwatches a publisher who is genuinely being watched", () => {
+    const { manager, sent } = setup();
+    manager.watch(PUBLISHER, "PC-SAM");
+    sent.length = 0;
+
+    manager.stop();
+    expect(sent).toEqual([{ type: "unwatch", publisherId: PUBLISHER }]);
+  });
 });

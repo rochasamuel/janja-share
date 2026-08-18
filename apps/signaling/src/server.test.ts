@@ -220,6 +220,37 @@ describe("signaling server", () => {
       }
     });
 
+    it("stays quiet when someone unwatches a member they were not watching", async () => {
+      const sam = await createChannel();
+      const ana = await joinChannel(sam.channelId, "PC-ANA");
+      await sam.client.expect("member-joined");
+
+      // Not watching them is what this asked for. Answering with an error
+      // scolds a person for a state they did not choose — and it reaches the
+      // panel, in English, on the way back out of a stream that ended.
+      ana.client.send({ type: "unwatch", publisherId: sam.id });
+      await ana.client.expectSilence();
+      await sam.client.expectSilence();
+    });
+
+    it("stays quiet when the publisher stopped first", async () => {
+      const sam = await createChannel();
+      const ana = await joinChannel(sam.channelId, "PC-ANA");
+      sam.client.send({ type: "publish-start" });
+      ana.client.send({ type: "watch", publisherId: sam.id });
+      await sam.client.expect("watch-request");
+      await ana.client.expect("member-publishing");
+
+      // The server drops every subscription when a publisher stops, so the
+      // viewer's own unwatch always arrives at a door that is already shut.
+      sam.client.send({ type: "publish-stop" });
+      await ana.client.expect("member-publishing");
+
+      ana.client.send({ type: "unwatch", publisherId: sam.id });
+      await ana.client.expectSilence();
+      await sam.client.expectSilence();
+    });
+
     it("tells the publisher when a viewer stops watching", async () => {
       const sam = await createChannel();
       const ana = await joinChannel(sam.channelId, "PC-ANA");

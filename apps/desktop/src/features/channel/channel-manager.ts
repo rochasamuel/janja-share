@@ -228,7 +228,7 @@ export class ChannelManager {
       }
 
       case "error": {
-        this.#handleError(message.code, message.message);
+        this.#handleError(message.code);
         return;
       }
 
@@ -242,12 +242,12 @@ export class ChannelManager {
    * viewing session still connecting is the only thing that could have caused
    * one that is not about membership.
    */
-  #handleError(code: string, fallback: string): void {
+  #handleError(code: string): void {
     if (this.#options.viewing.snapshot.state === "connecting") {
-      this.#options.viewing.fail(watchErrorMessage(code, fallback));
+      this.#options.viewing.fail(watchErrorMessage(code));
       return;
     }
-    this.#setState("error", channelErrorMessage(code, fallback));
+    this.#setState("error", channelErrorMessage(code));
   }
 
   #rejoin(): void {
@@ -302,7 +302,12 @@ function sortMembers(members: ChannelMember[]): ChannelMember[] {
   });
 }
 
-function channelErrorMessage(code: string, fallback: string): string {
+/**
+ * The server's own text never reaches the screen — see `watchErrorMessage`.
+ * Every code that a person can actually cause gets a sentence about what they
+ * did; the rest share one that admits nothing more is known.
+ */
+function channelErrorMessage(code: string): string {
   switch (code) {
     case "CHANNEL_NOT_FOUND":
       return "Esse código não corresponde a nenhum canal.";
@@ -310,7 +315,11 @@ function channelErrorMessage(code: string, fallback: string): string {
       return "Esse canal está cheio.";
     case "ALREADY_IN_CHANNEL":
       return "Você já está nesse canal.";
+    case "NOT_IN_CHANNEL":
+      return "Você não está em um canal.";
+    case "RATE_LIMITED":
+      return "Muita coisa de uma vez. Espere um instante e tente de novo.";
     default:
-      return fallback;
+      return "Algo deu errado na conexão com o servidor.";
   }
 }

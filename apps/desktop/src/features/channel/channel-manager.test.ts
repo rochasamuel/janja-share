@@ -404,4 +404,28 @@ describe("ChannelManager", () => {
     deliver({ type: "member-joined", member: { id: "ana", name: "PC-ANA", publishing: false } });
     expect(manager.snapshot.members).toHaveLength(1);
   });
+
+  it("never shows the server's own English text", async () => {
+    const { manager, joined, deliver } = setup();
+    await manager.create();
+    joined();
+
+    // The server writes for whoever reads the logs. Passing that straight to
+    // the panel put "You are not watching that member." in front of someone
+    // using an interface that is otherwise entirely in Portuguese.
+    deliver({ type: "error", code: "NOT_AUTHORIZED", message: "You cannot send to that peer." });
+
+    expect(manager.snapshot.message).toBe("Algo deu errado na conexão com o servidor.");
+  });
+
+  it("names the limit when the server refuses for being too fast", async () => {
+    const { manager, joined, deliver } = setup();
+    await manager.create();
+    joined();
+
+    deliver({ type: "error", code: "RATE_LIMITED", message: "Too many messages." });
+    expect(manager.snapshot.message).toBe(
+      "Muita coisa de uma vez. Espere um instante e tente de novo.",
+    );
+  });
 });
