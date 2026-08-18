@@ -7,6 +7,7 @@ const config = loadConfig();
 const server = await createSignalingServer({
   port: config.port,
   host: config.host,
+  maxMembers: config.maxMembers,
   maxViewers: config.maxViewers,
   ice: config.ice,
   logger: consoleLogger,

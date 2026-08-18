@@ -67,6 +67,26 @@ export class TestClient {
     });
   }
 
+  /**
+   * Next message of a given type, skipping anything else that arrives first.
+   *
+   * A channel delivers membership events on the same socket as signaling, so a
+   * test that asserted on the very next frame would be at the mercy of who
+   * joined when.
+   */
+  async expect<K extends ServerMessage["type"]>(
+    type: K,
+    timeoutMs = 1000,
+  ): Promise<Extract<ServerMessage, { type: K }>> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error(`timed out waiting for ${type}`);
+      const message = await this.next(remaining);
+      if (message.type === type) return message as Extract<ServerMessage, { type: K }>;
+    }
+  }
+
   /** Asserts the server says nothing at all for a while. */
   async expectSilence(ms = 250): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, ms));

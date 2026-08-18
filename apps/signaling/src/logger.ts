@@ -1,4 +1,4 @@
-export type LogCategory = "APP" | "SIGNALING" | "ROOM" | "TURN";
+export type LogCategory = "APP" | "SIGNALING" | "CHANNEL" | "TURN";
 
 export interface Logger {
   info(category: LogCategory, message: string, fields?: Record<string, unknown>): void;

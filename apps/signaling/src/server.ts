@@ -5,16 +5,21 @@ import {
   parseClientMessage,
   type ClientMessage,
   type ErrorCode,
+  type Member,
+  type MemberLeftReason,
   type ServerMessage,
 } from "@janja/signaling-protocol";
 import { buildIceServers, type IceConfig } from "./ice-servers.js";
-import { RoomManager, type Room } from "./room-manager.js";
+import { ChannelManager, type RemovalEffect } from "./channel-manager.js";
 import { TokenBucket, type RateLimitConfig } from "./rate-limiter.js";
 import { consoleLogger, type Logger } from "./logger.js";
 
 export interface SignalingServerOptions {
   port?: number;
   host?: string;
+  /** People in one channel. */
+  maxMembers: number;
+  /** Viewers of one publisher. */
   maxViewers: number;
   ice: IceConfig;
   rateLimit?: RateLimitConfig;
@@ -47,7 +52,10 @@ export async function createSignalingServer(
   const heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
   const rateLimit = options.rateLimit ?? DEFAULT_RATE_LIMIT;
 
-  const rooms = new RoomManager(options.maxViewers);
+  const channels = new ChannelManager({
+    maxMembers: options.maxMembers,
+    maxViewersPerPublisher: options.maxViewers,
+  });
   const sessions = new Map<string, Session>();
 
   const http = createServer(handleHttp);
@@ -67,10 +75,10 @@ export async function createSignalingServer(
     }
     if (isRead && req.url === "/healthz") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true, rooms: rooms.roomCount }));
+      res.end(JSON.stringify({ ok: true, channels: channels.channelCount }));
       return;
     }
-    // Rooms are deliberately not enumerable over any route.
+    // Channels are deliberately not enumerable over any route.
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "not found" }));
   }
@@ -90,93 +98,167 @@ export async function createSignalingServer(
   }
 
   /**
-   * The authorization rule the whole protocol rests on: a viewer may only talk
-   * to its sharer, and a sharer only to its own viewers. Without this, any
-   * viewer could push SDP into another viewer's peer connection.
+   * The authorization rule the whole protocol rests on.
+   *
+   * Sharing a channel is not enough. A stream exists only because somebody
+   * asked for it, so the subscription is what grants the right to send SDP —
+   * without that, any member could push an offer into any other member's peer
+   * connection just by being in the channel with them.
    */
-  function resolveTarget(
+  function mayAddress(
     session: Session,
+    kind: "offer" | "answer" | "ice-candidate",
     targetId: string,
-  ): { ok: true; room: Room } | { ok: false; code: ErrorCode } {
-    const room = rooms.getRoomForSession(session.id);
-    if (!room) return { ok: false, code: "NOT_IN_ROOM" };
+    publisherId: string,
+  ): boolean {
+    if (!channels.sameChannel(session.id, targetId)) return false;
 
-    const senderIsSharer = room.sharerId === session.id;
-    const allowed = senderIsSharer ? room.viewers.has(targetId) : targetId === room.sharerId;
-    if (!allowed) return { ok: false, code: "NOT_AUTHORIZED" };
+    const iAmThePublisher = session.id === publisherId;
+    if (kind === "offer") {
+      // Only the publisher offers, and only to someone who asked.
+      return iAmThePublisher && channels.isSubscribed(targetId, publisherId);
+    }
+    if (kind === "answer") {
+      // Only the watcher answers, and only to the publisher it asked.
+      return (
+        !iAmThePublisher &&
+        targetId === publisherId &&
+        channels.isSubscribed(session.id, publisherId)
+      );
+    }
+    // Candidates travel both ways over a subscription that already exists.
+    return iAmThePublisher
+      ? channels.isSubscribed(targetId, publisherId)
+      : targetId === publisherId && channels.isSubscribed(session.id, publisherId);
+  }
 
-    return { ok: true, room };
+  function sendJoined(
+    session: Session,
+    channelId: string,
+    displayName: string,
+    members: Member[],
+  ): void {
+    send(session, {
+      type: "channel-joined",
+      channelId,
+      sessionId: session.id,
+      displayName,
+      members,
+      iceServers: buildIceServers(options.ice, session.id),
+      maxViewersPerPublisher: channels.maxViewersPerPublisher,
+    });
   }
 
   function handleMessage(session: Session, message: ClientMessage): void {
     switch (message.type) {
-      case "create-room": {
-        const room = rooms.createRoom(session.id);
-        logger.info("ROOM", "room created", { room: room.roomId, sharer: session.id });
-        send(session, {
-          type: "room-created",
-          roomId: room.roomId,
-          sessionId: session.id,
-          iceServers: buildIceServers(options.ice, session.id),
-          maxViewers: rooms.maxViewers,
+      case "create-channel": {
+        const result = channels.createChannel(session.id, message.displayName);
+        if (!result.ok) {
+          sendError(session, result.code, "That name cannot be used.");
+          return;
+        }
+        logger.info("CHANNEL", "channel created", {
+          channel: result.channelId,
+          member: session.id,
         });
+        sendJoined(session, result.channelId, result.member.name, result.members);
         return;
       }
 
-      case "join-room": {
-        const result = rooms.joinRoom(message.roomId, session.id);
+      case "join-channel": {
+        const result = channels.joinChannel(message.channelId, session.id, message.displayName);
         if (!result.ok) {
-          logger.info("ROOM", "join refused", { room: message.roomId, reason: result.code });
-          sendError(session, result.code, joinErrorMessage(result.code, rooms.maxViewers));
+          logger.info("CHANNEL", "join refused", {
+            channel: message.channelId,
+            reason: result.code,
+          });
+          sendError(session, result.code, joinErrorMessage(result.code, options.maxMembers));
           return;
         }
 
-        logger.info("ROOM", "viewer joined", {
-          room: result.room.roomId,
-          viewer: session.id,
-          viewers: result.room.viewers.size,
+        logger.info("CHANNEL", "member joined", {
+          channel: result.channelId,
+          member: session.id,
+          members: result.members.length + 1,
         });
-        send(session, {
-          type: "room-joined",
-          roomId: result.room.roomId,
-          sessionId: session.id,
-          sharerId: result.room.sharerId,
-          iceServers: buildIceServers(options.ice, session.id),
-        });
-        sendTo(result.room.sharerId, { type: "viewer-joined", viewerId: session.id });
+        sendJoined(session, result.channelId, result.member.name, result.members);
+        for (const memberId of result.notify) {
+          sendTo(memberId, { type: "member-joined", member: result.member });
+        }
         return;
       }
 
-      case "leave-room": {
-        const effect = rooms.removeSession(session.id);
+      case "leave-channel": {
+        const effect = channels.removeSession(session.id);
         if (effect.kind === "none") {
-          sendError(session, "NOT_IN_ROOM", "You are not in a room.");
+          sendError(session, "NOT_IN_CHANNEL", "You are not in a channel.");
           return;
         }
         announceDeparture(effect, "left");
         return;
       }
 
-      case "offer":
-      case "answer": {
-        const target = resolveTarget(session, message.targetId);
-        if (!target.ok) {
-          sendError(session, target.code, "You cannot send to that peer.");
+      case "publish-start":
+      case "publish-stop": {
+        const publishing = message.type === "publish-start";
+        const result = channels.setPublishing(session.id, publishing);
+        if (!result.ok) {
+          sendError(session, result.code, "You are not in a channel.");
           return;
         }
-        sendTo(message.targetId, { type: message.type, fromId: session.id, sdp: message.sdp });
+        logger.info("CHANNEL", "publishing changed", { member: session.id, publishing });
+        for (const memberId of result.notify) {
+          sendTo(memberId, { type: "member-publishing", memberId: session.id, publishing });
+        }
+        return;
+      }
+
+      case "watch": {
+        const result = channels.watch(session.id, message.publisherId);
+        if (!result.ok) {
+          sendError(session, result.code, watchErrorMessage(result.code, options.maxViewers));
+          return;
+        }
+        // The publisher builds the connection and offers. Nothing exists until
+        // this message lands, which is the whole point of joining being cheap.
+        sendTo(result.publisherId, { type: "watch-request", fromId: session.id });
+        return;
+      }
+
+      case "unwatch": {
+        const result = channels.unwatch(session.id, message.publisherId);
+        if (!result.ok) {
+          sendError(session, result.code, "You are not watching that member.");
+          return;
+        }
+        sendTo(result.publisherId, { type: "unwatch", fromId: session.id });
+        return;
+      }
+
+      case "offer":
+      case "answer": {
+        if (!mayAddress(session, message.type, message.targetId, message.publisherId)) {
+          sendError(session, "NOT_AUTHORIZED", "You cannot send to that peer.");
+          return;
+        }
+        sendTo(message.targetId, {
+          type: message.type,
+          fromId: session.id,
+          publisherId: message.publisherId,
+          sdp: message.sdp,
+        });
         return;
       }
 
       case "ice-candidate": {
-        const target = resolveTarget(session, message.targetId);
-        if (!target.ok) {
-          sendError(session, target.code, "You cannot send to that peer.");
+        if (!mayAddress(session, "ice-candidate", message.targetId, message.publisherId)) {
+          sendError(session, "NOT_AUTHORIZED", "You cannot send to that peer.");
           return;
         }
         sendTo(message.targetId, {
           type: "ice-candidate",
           fromId: session.id,
+          publisherId: message.publisherId,
           candidate: message.candidate,
         });
         return;
@@ -184,31 +266,15 @@ export async function createSignalingServer(
     }
   }
 
-  function announceDeparture(
-    effect: ReturnType<RoomManager["removeSession"]>,
-    reason: "left" | "disconnected",
-  ): void {
-    if (effect.kind === "room-ended") {
-      logger.info("ROOM", "room ended", {
-        room: effect.room.roomId,
-        viewers: effect.room.viewers.size,
-      });
-      for (const viewerId of effect.room.viewers) {
-        sendTo(viewerId, { type: "room-ended", reason: "sharer-left" });
-      }
-      return;
-    }
-    if (effect.kind === "viewer-left") {
-      logger.info("ROOM", "viewer left", {
-        room: effect.room.roomId,
-        viewer: effect.viewerId,
-        reason,
-      });
-      sendTo(effect.room.sharerId, {
-        type: "viewer-left",
-        viewerId: effect.viewerId,
-        reason,
-      });
+  function announceDeparture(effect: RemovalEffect, reason: MemberLeftReason): void {
+    if (effect.kind === "none") return;
+    logger.info("CHANNEL", "member left", {
+      channel: effect.channelId,
+      member: effect.memberId,
+      reason,
+    });
+    for (const memberId of effect.notify) {
+      sendTo(memberId, { type: "member-left", memberId: effect.memberId, reason });
     }
   }
 
@@ -253,7 +319,7 @@ export async function createSignalingServer(
 
     socket.on("close", () => {
       sessions.delete(session.id);
-      announceDeparture(rooms.removeSession(session.id), "disconnected");
+      announceDeparture(channels.removeSession(session.id), "disconnected");
       logger.info("SIGNALING", "disconnected", { session: session.id });
     });
 
@@ -281,7 +347,11 @@ export async function createSignalingServer(
   heartbeat?.unref();
 
   const port = await listen(http, options.port ?? 0, options.host ?? "0.0.0.0");
-  logger.info("APP", "signaling server listening", { port, maxViewers: options.maxViewers });
+  logger.info("APP", "signaling server listening", {
+    port,
+    maxMembers: options.maxMembers,
+    maxViewers: options.maxViewers,
+  });
 
   return {
     port,
@@ -294,16 +364,31 @@ export async function createSignalingServer(
   };
 }
 
-function joinErrorMessage(code: ErrorCode, maxViewers: number): string {
+function joinErrorMessage(code: ErrorCode, maxMembers: number): string {
   switch (code) {
-    case "ROOM_FULL":
-      return `This stream is full. Maximum viewers: ${maxViewers}`;
-    case "ROOM_NOT_FOUND":
-      return "That room does not exist.";
-    case "ALREADY_IN_ROOM":
-      return "You are already in this room.";
+    case "CHANNEL_FULL":
+      return `This channel is full. Maximum members: ${maxMembers}`;
+    case "CHANNEL_NOT_FOUND":
+      return "That channel does not exist.";
+    case "ALREADY_IN_CHANNEL":
+      return "You are already in this channel.";
+    case "INVALID_MESSAGE":
+      return "That name cannot be used.";
     default:
       return "Unable to join.";
+  }
+}
+
+function watchErrorMessage(code: ErrorCode, maxViewers: number): string {
+  switch (code) {
+    case "NOT_PUBLISHING":
+      return "That member is not sharing a screen.";
+    case "ALREADY_WATCHING":
+      return "You can only watch one stream at a time.";
+    case "PUBLISHER_FULL":
+      return `That stream is full. Maximum viewers: ${maxViewers}`;
+    default:
+      return "Unable to watch.";
   }
 }
 
