@@ -138,6 +138,23 @@ export function useChannel(signaling: SignalingClient | null): UseChannel {
   }, [signaling]);
 
   /**
+   * The browser owns fullscreen, so its event is the source of truth — not the
+   * button in WatchScreen, which is only one of the ways in and out (Escape and
+   * F11 are others). This lives here rather than in the manager so the manager
+   * stays free of the DOM and testable in Node.
+   */
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      managerRef.current?.viewing.setViewSize(
+        document.fullscreenElement ? "fullscreen" : "panel",
+      );
+    };
+
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  /**
    * The video element mounts and unmounts as the user moves between screens,
    * but the stream outlives it. Re-attaching on mount is what keeps the
    * picture from coming back black.
