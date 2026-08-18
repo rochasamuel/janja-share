@@ -16,6 +16,8 @@ function networkTone(quality: Map<string, ConnectionQuality>): "ok" | "fault" | 
 
 interface Props {
   snapshot: SharingSnapshot;
+  /** The code belongs to the channel, not to this share. */
+  channelId: string | null;
   /** True while Chromium's picker is on screen. */
   picking: boolean;
   onStart: () => Promise<void>;
@@ -23,7 +25,7 @@ interface Props {
   onBack: () => void;
 }
 
-export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Props) {
+export function ShareScreen({ snapshot, channelId, picking, onStart, onStop, onBack }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
 
   const copy = useCallback((text: string, label: string) => {
@@ -82,8 +84,8 @@ export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Prop
   return (
     <>
       <div className="card">
-        <div className="sub">Código da sala</div>
-        <div className="code">{snapshot.roomId}</div>
+        <div className="sub">Código do canal</div>
+        <div className="code">{channelId}</div>
         <div className="meter">
           <span
             style={{
@@ -159,14 +161,14 @@ export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Prop
       <div className="rows">
         <Row
           icon="copy"
-          label={copied === "code" ? "Copiado" : "Copiar código da sala"}
+          label={copied === "code" ? "Copiado" : "Copiar código do canal"}
           shortcut="Ctrl C"
-          onClick={() => copy(snapshot.roomId ?? "", "code")}
+          onClick={() => copy(channelId ?? "", "code")}
         />
         <Row
           icon="link"
-          label={copied === "link" ? "Copiado" : "Copiar link para assistir"}
-          onClick={() => copy(`janjashare://room/${snapshot.roomId}`, "link")}
+          label={copied === "link" ? "Copiado" : "Copiar link do canal"}
+          onClick={() => copy(`janjashare://channel/${channelId}`, "link")}
         />
       </div>
 
