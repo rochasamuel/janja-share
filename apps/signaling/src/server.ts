@@ -238,6 +238,24 @@ export async function createSignalingServer(
         return;
       }
 
+      case "view-size": {
+        // Not mayAddress: that exists for the three messages carrying both a
+        // targetId and a publisherId, where two members watching each other
+        // makes the pair ambiguous. This one only ever travels viewer ->
+        // publisher, so the subscription is the whole rule.
+        //
+        // Silent when there is none, for the reason unwatch is silent: a size
+        // for a subscription the server already dropped is not a state the
+        // person chose.
+        if (!channels.isSubscribed(session.id, message.publisherId)) return;
+        sendTo(message.publisherId, {
+          type: "view-size",
+          fromId: session.id,
+          size: message.size,
+        });
+        return;
+      }
+
       case "offer":
       case "answer": {
         if (!mayAddress(session, message.type, message.targetId, message.publisherId)) {

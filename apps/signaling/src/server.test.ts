@@ -263,6 +263,38 @@ describe("signaling server", () => {
     });
   });
 
+  describe("view size", () => {
+    it("passes a watcher's size to the publisher it is watching", async () => {
+      const sam = await createChannel();
+      const ana = await joinChannel(sam.channelId, "PC-ANA");
+      sam.client.send({ type: "publish-start" });
+      await ana.client.expect("member-publishing");
+
+      ana.client.send({ type: "watch", publisherId: sam.id });
+      await sam.client.expect("watch-request");
+
+      ana.client.send({ type: "view-size", publisherId: sam.id, size: "fullscreen" });
+      const event = await sam.client.expect("view-size");
+      expect(event).toEqual({ type: "view-size", fromId: ana.id, size: "fullscreen" });
+    });
+
+    it("ignores a size from someone who is not watching that publisher", async () => {
+      const sam = await createChannel();
+      const ana = await joinChannel(sam.channelId, "PC-ANA");
+      await sam.client.expect("member-joined");
+      sam.client.send({ type: "publish-start" });
+      await ana.client.expect("member-publishing");
+
+      // Never sent a watch. The subscription is what authorizes this.
+      ana.client.send({ type: "view-size", publisherId: sam.id, size: "panel" });
+
+      // Nothing forwarded, and no error frame back: a size for a subscription
+      // that is not there is not something the person chose.
+      await sam.client.expectSilence();
+      await ana.client.expectSilence();
+    });
+  });
+
   describe("authorization", () => {
     it("refuses an offer to a member who never asked to watch", async () => {
       const sam = await createChannel();
