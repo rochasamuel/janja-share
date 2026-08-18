@@ -17,6 +17,8 @@ export interface StreamStats {
   codec: string | null;
   powerEfficient: boolean | null;
   implementation: string | null;
+  /** Why an encoder is holding back, if any is: "cpu", "bandwidth", "other". */
+  qualityLimitation: string | null;
 }
 
 /**
@@ -43,6 +45,9 @@ export function aggregateStats(samples: QualitySample[]): StreamStats | null {
     // game feels.
     powerEfficient: anyFalse(samples.map((s) => s.powerEfficient)),
     implementation: first(samples.map((s) => s.implementation)),
+    // One viewer starved is the story worth telling, exactly as with the
+    // software-encoder flag above.
+    qualityLimitation: first(samples.map((s) => s.qualityLimitation)),
   };
 }
 
@@ -56,6 +61,26 @@ export function formatEncoder(stats: StreamStats | null): string | null {
   if (stats.powerEfficient !== null) parts.push(stats.powerEfficient ? "GPU" : "CPU");
 
   return parts.join(" · ");
+}
+
+/**
+ * Why the picture is worse than it was asked to be, in words.
+ *
+ * Null when nothing is holding the encoder back, so the readout stays absent
+ * rather than reassuring: a line saying "nothing wrong" is noise, and a line
+ * that appears only when something is wrong is a diagnosis.
+ */
+export function formatLimit(stats: StreamStats | null): string | null {
+  switch (stats?.qualityLimitation) {
+    case "cpu":
+      return "CPU — o computador não dá conta de codificar";
+    case "bandwidth":
+      return "banda — o link de subida não dá conta";
+    case "other":
+      return "outro";
+    default:
+      return null;
+  }
 }
 
 /** "1920×1080 · 58 fps" */

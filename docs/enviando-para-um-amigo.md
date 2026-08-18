@@ -1,7 +1,7 @@
 # Enviando o app para um amigo
 
-Três coisas precisam ser verdade antes de um amigo em outra casa conseguir ver
-a sua tela. O instalador é a parte fácil.
+Três coisas precisam ser verdade antes de um amigo em outra casa conseguir
+entrar no seu canal. O instalador é a parte fácil.
 
 1. Um servidor de sinalização que os dois alcancem pela internet
 2. O app compilado com o endereço desse servidor gravado dentro
@@ -58,7 +58,7 @@ máquina dos seus amigos.
 |---|---|
 | O endereço muda a cada execução | O endereço fica gravado no `.exe` no momento do build. Reiniciou o túnel? Tem que buildar de novo e reenviar o instalador para todo mundo. |
 | Não passa TURN | Um túnel HTTP não carrega o UDP do relay. Amigos atrás de NAT restrito ou CGNAT (comum em internet via rádio e em alguns planos de fibra no Brasil) simplesmente não conectam. Uns 8 em cada 10 funcionam. |
-| Sua máquina é o servidor | Enquanto você não estiver com os dois terminais rodando, ninguém entra em sala nenhuma. |
+| Sua máquina é o servidor | Enquanto você não estiver com os dois terminais rodando, ninguém entra em canal nenhum. |
 
 Se os três incomodarem, é hora do caminho B.
 
@@ -176,13 +176,13 @@ Teste nesta ordem. Cada passo elimina uma falha diferente.
 curl https://algo-aleatorio.trycloudflare.com/healthz
 ```
 
-Espere `{"ok":true,"rooms":0}`. Se isto falhar, nada mais pode funcionar.
+Espere `{"ok":true,"channels":0}`. Se isto falhar, nada mais pode funcionar.
 
 **O app chega nele?** Abra o app. O cabeçalho diz `conectado`. Se disser
 `sem conexão`, o endereço estava errado na hora do build, e nenhuma tentativa
 do lado do seu amigo vai resolver.
 
-**A conexão direta funciona?** Compartilhe e peça para o amigo entrar. Se a
+**A conexão direta funciona?** Siga o passo a passo do canal abaixo. Se a
 imagem chegar, você nunca precisou de TURN.
 
 **O relay funciona?** (só faz sentido no caminho B) Isto tem que ser forçado,
@@ -201,17 +201,46 @@ servidor.
 
 ---
 
+## Usando o canal
+
+O canal é o encontro; a transmissão é opcional dentro dele.
+
+1. **Você:** abra o app e clique em **Criar um canal** (`Ctrl N`). Aparecem
+   seis caracteres.
+2. **Você:** leia os seis caracteres em voz alta, ou clique em **Copiar
+   código** e mande pelo chat.
+3. **Seu amigo:** **Entrar em um canal** (`Ctrl J`), digita o código, Enter.
+4. Os dois aparecem na lista, cada um com o nome do próprio PC. Ninguém está
+   transmitindo ainda, e nenhuma conexão foi construída — entrar no canal não
+   custa nada.
+5. **Quem quiser mostrar a tela:** **Compartilhar minha tela** (`Ctrl S`).
+   Um selo **ao vivo** aparece ao lado do nome dessa pessoa para todo mundo.
+6. **Quem quiser assistir:** clique no nome de quem está ao vivo. *Só agora* a
+   conexão é construída.
+
+Qualquer um pode fazer os dois ao mesmo tempo: transmitir a própria tela e
+assistir à de outra pessoa. O que não dá é assistir a duas ao mesmo tempo —
+pare uma antes de abrir a outra.
+
+Sair da transmissão (`Esc`) mantém você no canal. Para sair de vez, use **Sair
+do canal**.
+
+---
+
 ## O que seu amigo deve esperar
 
-Seis espectadores é o teto, e quem define isso é o **seu upload**, não a
-conexão dele. Cada espectador recebe uma cópia separada da transmissão saindo
+Seis espectadores é o teto **por pessoa que transmite**, e quem define isso é o
+**upload de quem transmite**, não a conexão de quem assiste. Cada espectador recebe uma cópia separada da transmissão saindo
 da sua máquina: seis deles a 6 Mbps dão uns 36 Mbps de upload. Num plano
 assimétrico típico (digamos 300 de download e 30 de upload), três ou quatro
 espectadores vão ser o limite real, e o app baixa a qualidade em vez de
 derrubar alguém.
 
 Se para você está tudo liso e seus amigos veem apresentação de slides, o
-motivo é quase sempre o upload, não o download deles.
+motivo é quase sempre o seu upload, não o download deles.
+
+Um canal com oito pessoas não custa oito vezes mais: a conta só existe para
+quem está transmitindo, e só conta quem clicou para assistir.
 
 Vale ajustar o preset em **Qualidade** (`Ctrl ,`): "Economia de banda" a 2,5
 Mbps por espectador cabe em bem mais lugares que o "Automático" a 8.

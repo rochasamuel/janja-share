@@ -109,12 +109,15 @@ function fakeStream(): MediaStream {
   return { getTracks: () => tracks } as unknown as MediaStream;
 }
 
+const PUBLISHER = "publisher-1";
+
 function setup() {
   const sent: ClientMessage[] = [];
   const errors: { viewerId: string; error: unknown }[] = [];
   const viewerSnapshots: string[][] = [];
 
   const manager = new ViewerConnectionManager({
+    publisherId: PUBLISHER,
     createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
     send: (message) => sent.push(message),
     onViewersChanged: (ids) => viewerSnapshots.push(ids),
@@ -138,7 +141,25 @@ describe("ViewerConnectionManager", () => {
     await manager.addViewer("viewer-1");
 
     expect(pcFor(0).tracks).toHaveLength(2);
-    expect(sent).toEqual([{ type: "offer", targetId: "viewer-1", sdp: "v=0 offer" }]);
+    expect(sent).toEqual([
+      { type: "offer", targetId: "viewer-1", publisherId: PUBLISHER, sdp: "v=0 offer" },
+    ]);
+  });
+
+  it("stamps its own publisherId on every message it sends", async () => {
+    const { manager, sent } = setup();
+    await manager.addViewer("viewer-1");
+
+    expect(sent.find((message) => message.type === "offer")).toMatchObject({
+      targetId: "viewer-1",
+      publisherId: PUBLISHER,
+    });
+
+    pcFor(0).emitCandidate({ candidate: "candidate:1" });
+    expect(sent.find((message) => message.type === "ice-candidate")).toMatchObject({
+      targetId: "viewer-1",
+      publisherId: PUBLISHER,
+    });
   });
 
   it("builds one connection per viewer", async () => {
@@ -173,7 +194,12 @@ describe("ViewerConnectionManager", () => {
     pcFor(1).emitCandidate({ candidate: "candidate:2" });
 
     expect(sent).toEqual([
-      { type: "ice-candidate", targetId: "viewer-2", candidate: { candidate: "candidate:2" } },
+      {
+        type: "ice-candidate",
+        targetId: "viewer-2",
+        publisherId: PUBLISHER,
+        candidate: { candidate: "candidate:2" },
+      },
     ]);
   });
 
@@ -202,7 +228,9 @@ describe("ViewerConnectionManager", () => {
     await manager.addViewer("viewer-1");
 
     const parameters = pcFor(0).parametersOfVideoSender();
-    expect(parameters.encodings?.[0]?.maxBitrate).toBe(8_000_000);
+    // A new viewer is in the panel, so the default ceiling arrives scaled to
+    // the picture it is actually being sent.
+    expect(parameters.encodings?.[0]?.maxBitrate).toBe(Math.round(8_000_000 / 9));
     expect(parameters.degradationPreference).toBe("maintain-resolution");
   });
 
@@ -215,6 +243,7 @@ describe("ViewerConnectionManager", () => {
       // hardware. Six software encodes is what eats the CPU.
       const applied: string[] = [];
       const manager = new ViewerConnectionManager({
+        publisherId: PUBLISHER,
         createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
         send: () => {},
         applyCodecPreferences: () => {
@@ -233,6 +262,7 @@ describe("ViewerConnectionManager", () => {
     it("does so for every viewer, not just the first", async () => {
       let count = 0;
       const manager = new ViewerConnectionManager({
+        publisherId: PUBLISHER,
         createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
         send: () => {},
         applyCodecPreferences: () => {
@@ -251,12 +281,16 @@ describe("ViewerConnectionManager", () => {
   describe("encoding settings", () => {
     it("uses the ceiling it was built with", async () => {
       const manager = new ViewerConnectionManager({
+        publisherId: PUBLISHER,
         createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
         send: () => {},
         encoding: { maxBitrateBps: 2_500_000, degradationPreference: "maintain-framerate" },
       });
       manager.setStream(fakeStream());
       await manager.addViewer("viewer-1");
+      // Fullscreen so this stays a test of the ceiling it was built with,
+      // rather than of the scaling arithmetic, which has its own tests.
+      manager.setViewerSize("viewer-1", "fullscreen");
 
       const parameters = pcFor(0).parametersOfVideoSender();
       expect(parameters.encodings?.[0]?.maxBitrate).toBe(2_500_000);
@@ -269,6 +303,8 @@ describe("ViewerConnectionManager", () => {
       const { manager, sent } = setup();
       await manager.addViewer("viewer-1");
       await manager.addViewer("viewer-2");
+      manager.setViewerSize("viewer-1", "fullscreen");
+      manager.setViewerSize("viewer-2", "fullscreen");
       const offersBefore = sent.filter((message) => message.type === "offer").length;
 
       manager.setEncoding({
@@ -291,8 +327,113 @@ describe("ViewerConnectionManager", () => {
         degradationPreference: "maintain-resolution",
       });
       await manager.addViewer("viewer-1");
+      manager.setViewerSize("viewer-1", "fullscreen");
 
       expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(2_500_000);
+    });
+  });
+
+  describe("view size", () => {
+    it("sends a panel-sized picture until the viewer says otherwise", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.scaleResolutionDownBy).toBe(3);
+    });
+
+    it("sends the whole picture to a viewer in fullscreen", async () => {
+      const { manager, sent } = setup();
+      await manager.addViewer("viewer-1");
+      const offersBefore = sent.filter((message) => message.type === "offer").length;
+
+      manager.setViewerSize("viewer-1", "fullscreen");
+
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.scaleResolutionDownBy).toBe(1);
+      // Same reason setEncoding goes through setParameters: no renegotiation,
+      // so going fullscreen costs nobody their picture.
+      expect(sent.filter((message) => message.type === "offer").length).toBe(offersBefore);
+    });
+
+    it("keeps each viewer's own scale when the preset changes", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+      await manager.addViewer("viewer-2");
+      manager.setViewerSize("viewer-2", "fullscreen");
+
+      manager.setEncoding({ maxBitrateBps: 1_000_000, degradationPreference: "balanced" });
+
+      const first = pcFor(0).parametersOfVideoSender().encodings?.[0];
+      const second = pcFor(1).parametersOfVideoSender().encodings?.[0];
+      expect(first?.scaleResolutionDownBy).toBe(3);
+      expect(second?.scaleResolutionDownBy).toBe(1);
+      // The ceiling follows the scale: a ninth of 1 Mbps is under the floor.
+      expect(first?.maxBitrate).toBe(500_000);
+      expect(second?.maxBitrate).toBe(1_000_000);
+    });
+
+    it("gives a viewer who joins later the panel scale", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+      manager.setViewerSize("viewer-1", "fullscreen");
+
+      await manager.addViewer("viewer-2");
+
+      expect(pcFor(1).parametersOfVideoSender().encodings?.[0]?.scaleResolutionDownBy).toBe(3);
+    });
+
+    it("scales the ceiling down with the picture, not just the pixels", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+
+      // A third of the width is a ninth of the area, and a ceiling left at the
+      // full-screen figure would let congestion control spend it all on a
+      // near-lossless 640x360.
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(
+        Math.round(8_000_000 / 9),
+      );
+    });
+
+    it("gives a fullscreen viewer the whole ceiling", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+
+      manager.setViewerSize("viewer-1", "fullscreen");
+
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(8_000_000);
+    });
+
+    it("never drops the ceiling below what screen text needs", async () => {
+      const manager = new ViewerConnectionManager({
+        publisherId: PUBLISHER,
+        createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+        send: () => {},
+        // A ninth of this is 111 kbps, which is not a ceiling but a straitjacket.
+        encoding: { maxBitrateBps: 1_000_000, degradationPreference: "maintain-resolution" },
+      });
+      manager.setStream(fakeStream());
+      await manager.addViewer("viewer-1");
+
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(500_000);
+    });
+
+    it("re-aims the ceiling too when the preset changes", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+      await manager.addViewer("viewer-2");
+      manager.setViewerSize("viewer-2", "fullscreen");
+
+      manager.setEncoding({
+        maxBitrateBps: 9_000_000,
+        degradationPreference: "maintain-resolution",
+      });
+
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(1_000_000);
+      expect(pcFor(1).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(9_000_000);
+    });
+
+    it("ignores a size for a viewer that has already gone", () => {
+      const { manager } = setup();
+      expect(() => manager.setViewerSize("ghost", "fullscreen")).not.toThrow();
     });
   });
 
@@ -407,6 +548,7 @@ describe("ViewerConnectionManager", () => {
     it("cleans up the failed viewer when negotiation throws", async () => {
       const sent: ClientMessage[] = [];
       const manager = new ViewerConnectionManager({
+        publisherId: PUBLISHER,
         createPeerConnection: () => {
           const pc = new FakePeerConnection();
           pc.failOn = "createOffer";
@@ -423,6 +565,7 @@ describe("ViewerConnectionManager", () => {
 
     it("survives the signaling socket being closed mid-negotiation", async () => {
       const manager = new ViewerConnectionManager({
+        publisherId: PUBLISHER,
         createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
         send: () => {
           throw new Error("socket is not connected");

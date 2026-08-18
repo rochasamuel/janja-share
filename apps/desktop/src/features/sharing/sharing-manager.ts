@@ -1,4 +1,4 @@
-import type { IceServer, ServerMessage } from "@janja/signaling-protocol";
+import type { IceServer, ServerMessage, ViewSize } from "@janja/signaling-protocol";
 import type { SignalingClient } from "../../services/signaling/signaling-client.js";
 import { QUALITY_PRESETS, type QualityProfile } from "../../services/settings.js";
 import type { ConnectionQuality } from "../../services/webrtc/connection-quality.js";
@@ -17,7 +17,6 @@ export type SharingState = "idle" | "starting" | "sharing" | "stopping" | "error
 
 export interface SharingSnapshot {
   state: SharingState;
-  roomId: string | null;
   viewerIds: string[];
   maxViewers: number;
   audioSource: AudioSource;
@@ -57,11 +56,10 @@ export class SharingManager {
   #viewers: ViewerConnectionManager | undefined;
   #stream: MediaStream | undefined;
   #stopCaptureListener: (() => void) | undefined;
-  #unsubscribeSignaling: (() => void) | undefined;
   #iceServers: IceServer[] = [];
 
   #state: SharingState = "idle";
-  #roomId: string | null = null;
+  #selfId: string | null = null;
   #maxViewers = 6;
   #audioSource: AudioSource = "none";
   #audioProcess: string | null = null;
@@ -79,7 +77,6 @@ export class SharingManager {
   get snapshot(): SharingSnapshot {
     return {
       state: this.#state,
-      roomId: this.#roomId,
       viewerIds: this.#viewers?.viewerIds ?? [],
       maxViewers: this.#maxViewers,
       audioSource: this.#audioSource,
@@ -91,12 +88,33 @@ export class SharingManager {
   }
 
   /**
-   * Capture first, room second. Asking the network for a room before the user
-   * has agreed to share their screen would leave a live empty room behind
-   * every time someone presses cancel.
+   * Told to us by the channel when we join, and again after a reconnect —
+   * which issues a new session id, so this cannot be captured once at
+   * construction time.
    */
-  async start(): Promise<void> {
-    if (this.#state !== "idle" && this.#state !== "error") return;
+  setSession(selfId: string, iceServers: IceServer[], maxViewers: number): void {
+    this.#selfId = selfId;
+    this.#iceServers = iceServers;
+    this.#maxViewers = maxViewers;
+  }
+
+  /**
+   * Starts capture. Returns whether we are live.
+   *
+   * The caller announces it to the channel; this manager deliberately sends no
+   * membership message of its own, so there is exactly one place that decides
+   * what the rest of the channel believes about us.
+   */
+  async start(): Promise<boolean> {
+    if (this.#state !== "idle" && this.#state !== "error") {
+      return this.#state === "sharing";
+    }
+
+    const selfId = this.#selfId;
+    if (selfId === null) {
+      this.#setState("error", "Entre em um canal antes de compartilhar.");
+      return false;
+    }
 
     this.#setState("starting", null);
 
@@ -112,27 +130,32 @@ export class SharingManager {
       this.#audioSource = capture.audioSource;
       this.#audioProcess = capture.audioProcess ?? null;
       this.#stopAudio = capture.stopAudio;
-      const stream = capture.stream;
 
-      this.#stopCaptureListener = onCaptureEnded(stream, () => {
+      this.#stopCaptureListener = onCaptureEnded(capture.stream, () => {
         // Windows' own stop button ended it; the UI must not keep saying LIVE.
         void this.stop();
       });
 
-      this.#unsubscribeSignaling = this.#options.signaling.onMessage((message) => {
-        void this.#handleSignalingMessage(message);
+      this.#viewers = new ViewerConnectionManager({
+        publisherId: selfId,
+        createPeerConnection: () => this.#options.createPeerConnection(this.#iceServers),
+        send: (outbound) => this.#options.signaling.send(outbound),
+        encoding: encodingOf(this.#profile),
+        onViewersChanged: () => this.#emit(),
+        onError: () => this.#emit(),
       });
+      this.#viewers.setStream(capture.stream);
 
-      this.#options.signaling.send({ type: "create-room" });
-
-      this.#emit();
+      this.#setState("sharing", audioMessage(this.#audioSource, this.#audioProcess));
+      return true;
     } catch (error) {
       this.#cleanup();
       if (error instanceof CaptureCancelledError) {
         this.#setState("idle", null);
-        return;
+        return false;
       }
       this.#setState("error", "Não foi possível capturar a sua tela.");
+      return false;
     }
   }
 
@@ -140,15 +163,7 @@ export class SharingManager {
     if (this.#state === "idle" || this.#state === "stopping") return;
 
     this.#setState("stopping", null);
-
-    try {
-      this.#options.signaling.send({ type: "leave-room" });
-    } catch {
-      // Already disconnected; the server drops the room when the socket does.
-    }
-
     this.#cleanup();
-    this.#roomId = null;
     this.#setState("idle", null);
   }
 
@@ -195,59 +210,54 @@ export class SharingManager {
     this.#emit();
   }
 
-  async #handleSignalingMessage(message: ServerMessage): Promise<void> {
+  /** Somebody clicked us. This is the only thing that builds a connection. */
+  async addWatcher(viewerId: string): Promise<void> {
+    try {
+      await this.#viewers?.addViewer(viewerId);
+    } catch {
+      // Already isolated and cleaned up inside the manager; the share and
+      // every other viewer carry on.
+    }
+    this.#emit();
+  }
+
+  removeWatcher(viewerId: string): void {
+    this.#viewers?.removeViewer(viewerId);
+    this.#quality.delete(viewerId);
+    this.#emit();
+  }
+
+  /**
+   * A viewer reported how much picture it can show.
+   *
+   * No emit: this changes what leaves the machine, not anything the panel
+   * displays, and the readout already reports the resolution on the wire.
+   */
+  setViewerSize(viewerId: string, size: ViewSize): void {
+    this.#viewers?.setViewerSize(viewerId, size);
+  }
+
+  /**
+   * Handles only what belongs to the stream we publish.
+   *
+   * The `publisherId` check is not a formality: the same socket carries the
+   * stream we are watching, and without it an answer meant for that connection
+   * would be fed into one of ours.
+   */
+  async handleMessage(message: ServerMessage): Promise<void> {
+    const selfId = this.#selfId;
+    if (selfId === null) return;
+
     switch (message.type) {
-      case "room-created": {
-        this.#roomId = message.roomId;
-        this.#maxViewers = message.maxViewers;
-        this.#iceServers = message.iceServers;
-
-        this.#viewers = new ViewerConnectionManager({
-          createPeerConnection: () => this.#options.createPeerConnection(this.#iceServers),
-          send: (outbound) => this.#options.signaling.send(outbound),
-          encoding: encodingOf(this.#profile),
-          onViewersChanged: () => this.#emit(),
-          onError: () => this.#emit(),
-        });
-        this.#viewers.setStream(this.#stream);
-
-        this.#setState("sharing", audioMessage(this.#audioSource, this.#audioProcess));
-        return;
-      }
-
-      case "viewer-joined": {
-        try {
-          await this.#viewers?.addViewer(message.viewerId);
-        } catch {
-          // Already isolated and cleaned up inside the manager; the room and
-          // every other viewer carry on.
-        }
-        this.#emit();
-        return;
-      }
-
-      case "viewer-left": {
-        this.#viewers?.removeViewer(message.viewerId);
-        this.#quality.delete(message.viewerId);
-        this.#emit();
-        return;
-      }
-
       case "answer": {
+        if (message.publisherId !== selfId) return;
         await this.#viewers?.handleAnswer(message.fromId, message.sdp);
         return;
       }
 
       case "ice-candidate": {
+        if (message.publisherId !== selfId) return;
         await this.#viewers?.handleIceCandidate(message.fromId, message.candidate);
-        return;
-      }
-
-      case "error": {
-        // ROOM_FULL is the server refusing a viewer, not a fault in this
-        // session, so it must never stop the people already watching.
-        if (message.code === "ROOM_FULL") return;
-        this.#setState("error", "Algo deu errado na conexão.");
         return;
       }
 
@@ -259,9 +269,6 @@ export class SharingManager {
   #cleanup(): void {
     this.#stopCaptureListener?.();
     this.#stopCaptureListener = undefined;
-
-    this.#unsubscribeSignaling?.();
-    this.#unsubscribeSignaling = undefined;
 
     this.#viewers?.closeAll();
     this.#viewers = undefined;

@@ -68,9 +68,11 @@ describe("quality presets", () => {
     // The hint is what stops the encoder from spending its budget preserving
     // every edge of a scene that changes completely each frame.
     expect(QUALITY_PRESETS.game.profile.contentHint).toBe("motion");
-    for (const name of ["auto", "sharp", "smooth", "thrifty"] as const) {
+    for (const name of ["auto", "smooth", "thrifty"] as const) {
       expect(QUALITY_PRESETS[name].profile.contentHint, name).toBe("detail");
     }
+    // The preset named for text is more specific still.
+    expect(QUALITY_PRESETS.sharp.profile.contentHint).toBe("text");
   });
 
   it("costs less to encode than every preset it competes with", () => {

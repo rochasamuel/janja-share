@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { config } from "../config.js";
 import {
   SignalingClient,
@@ -15,6 +15,8 @@ import {
 export function useSignaling(): {
   client: SignalingClient | null;
   state: SignalingState;
+  /** Manual retry, for when the backoff has given up entirely. */
+  retry: () => void;
 } {
   const clientRef = useRef<SignalingClient | null>(null);
   const [state, setState] = useState<SignalingState>("idle");
@@ -36,5 +38,7 @@ export function useSignaling(): {
     };
   }, []);
 
-  return { client: clientRef.current, state };
+  const retry = useCallback(() => clientRef.current?.connect(), []);
+
+  return { client: clientRef.current, state, retry };
 }

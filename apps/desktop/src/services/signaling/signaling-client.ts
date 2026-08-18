@@ -83,6 +83,10 @@ export class SignalingClient {
 
   connect(): void {
     if (this.#state === "connected" || this.#state === "connecting") return;
+    // An explicit connect after giving up is a person deciding to try again,
+    // so the attempt counter starts over. Without this the retry gets exactly
+    // one shot before the backoff declares failure all over again.
+    if (this.#state === "failed") this.#attempt = 0;
     this.#shuttingDown = false;
     this.#open();
   }

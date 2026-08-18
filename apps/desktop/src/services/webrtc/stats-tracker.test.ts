@@ -59,6 +59,7 @@ describe("StatsTracker, either direction", () => {
       codec: null,
       powerEfficient: null,
       implementation: null,
+      qualityLimitation: null,
       iceState: "connected",
     });
   });
@@ -200,6 +201,27 @@ describe("StatsTracker, the encoder in use", () => {
     );
     expect(sample.powerEfficient).toBe(true);
     expect(sample.implementation).toBe("ExternalEncoder");
+  });
+
+  it("reports why the encoder is holding back, which is the whole diagnosis", () => {
+    // "cpu" and "bandwidth" call for opposite responses, and without this the
+    // two are indistinguishable from the outside: both read as a low frame
+    // rate that a restart appears to cure.
+    const tracker = new StatsTracker("send");
+    const sample = tracker.sample(
+      report([{ ...outboundVideo({}), qualityLimitationReason: "cpu" }]),
+      "connected",
+    );
+    expect(sample.qualityLimitation).toBe("cpu");
+  });
+
+  it("treats an unlimited encoder as nothing to report", () => {
+    const tracker = new StatsTracker("send");
+    const sample = tracker.sample(
+      report([{ ...outboundVideo({}), qualityLimitationReason: "none" }]),
+      "connected",
+    );
+    expect(sample.qualityLimitation).toBeNull();
   });
 
   it("reports software encoding, which is the case worth catching", () => {

@@ -1,4 +1,4 @@
-import type { ClientMessage, IceCandidateInit } from "@janja/signaling-protocol";
+import type { ClientMessage, IceCandidateInit, ViewSize } from "@janja/signaling-protocol";
 import { StatsTracker } from "../../services/webrtc/stats-tracker.js";
 import {
   classifyQuality,
@@ -18,6 +18,14 @@ export interface EncodingSettings {
 }
 
 export interface ViewerConnectionManagerOptions {
+  /**
+   * Our own session id, stamped on everything we send.
+   *
+   * Two members can watch each other, which is two peer connections between
+   * the same pair going opposite ways. Without this the far end cannot tell
+   * which of the two an offer belongs to.
+   */
+  publisherId: string;
   createPeerConnection: PeerConnectionFactory;
   send: (message: ClientMessage) => void;
   encoding?: EncodingSettings;
@@ -33,6 +41,42 @@ interface ViewerEntry {
   quality: ConnectionQuality;
   /** Last reading, or null while this viewer's statistics are unreadable. */
   sample: QualitySample | null;
+  /**
+   * How much picture this viewer can show. Panel until it says otherwise,
+   * because the panel is where every viewer starts.
+   */
+  size: ViewSize;
+}
+
+/**
+ * How far down to scale for each size a viewer can report.
+ *
+ * 1920/3 is 640 device pixels across, and the panel's 312px element at
+ * devicePixelRatio 2 needs 624 — so the panel is covered with nothing spent on
+ * detail it cannot resolve. Fullscreen gets the picture untouched.
+ */
+const SCALE_FOR: Record<ViewSize, number> = { panel: 3, fullscreen: 1 };
+
+/**
+ * The floor under a scaled ceiling.
+ *
+ * Below this, screen text starts falling apart at any resolution, and the
+ * ceiling stops being a limit and becomes a straitjacket.
+ */
+const MIN_BITRATE_BPS = 500_000;
+
+/**
+ * The ceiling for one viewer, scaled to the picture it is actually being sent.
+ *
+ * Bitrate demand tracks pixel count, and a third of the width is a ninth of
+ * the area. Leaving the full-screen ceiling in place for a panel viewer would
+ * not save the bandwidth the scaling was for: congestion control probes upward
+ * for as long as the link allows, and the encoder would happily spend eight
+ * megabits producing a near-lossless 640x360.
+ */
+function ceilingFor(maxBitrateBps: number, size: ViewSize): number {
+  const scale = SCALE_FOR[size];
+  return Math.max(MIN_BITRATE_BPS, Math.round(maxBitrateBps / (scale * scale)));
 }
 
 const DEFAULT_ENCODING: EncodingSettings = {
@@ -100,6 +144,7 @@ export class ViewerConnectionManager {
       stats: new StatsTracker("send"),
       quality: "reconnecting",
       sample: null,
+      size: "panel",
     };
     this.#viewers.set(viewerId, entry);
     this.#notifyViewersChanged();
@@ -110,6 +155,7 @@ export class ViewerConnectionManager {
         this.#safeSend({
           type: "ice-candidate",
           targetId: viewerId,
+          publisherId: this.#options.publisherId,
           candidate: event.candidate.toJSON() as IceCandidateInit,
         });
       };
@@ -128,12 +174,17 @@ export class ViewerConnectionManager {
       // Both of these have to happen before the offer exists. The offer is
       // the only one this connection ever makes.
       (this.#options.applyCodecPreferences ?? applyCodecPreferences)(connection);
-      this.#applySendParameters(connection);
+      this.#applySendParameters(connection, entry.size);
 
       const offer = await connection.createOffer();
       await connection.setLocalDescription(offer);
 
-      this.#safeSend({ type: "offer", targetId: viewerId, sdp: offer.sdp ?? "" });
+      this.#safeSend({
+        type: "offer",
+        targetId: viewerId,
+        publisherId: this.#options.publisherId,
+        sdp: offer.sdp ?? "",
+      });
     } catch (error) {
       this.removeViewer(viewerId);
       this.#options.onError?.(viewerId, error);
@@ -217,11 +268,24 @@ export class ViewerConnectionManager {
   setEncoding(encoding: EncodingSettings): void {
     this.#encoding = encoding;
     for (const entry of this.#viewers.values()) {
-      this.#applySendParameters(entry.connection);
+      this.#applySendParameters(entry.connection, entry.size);
     }
   }
 
-  #applySendParameters(connection: RTCPeerConnection): void {
+  /**
+   * A viewer reported how much picture it can show.
+   *
+   * Like setEncoding, this is a parameter change and not a renegotiation, so
+   * going fullscreen costs nobody their picture.
+   */
+  setViewerSize(viewerId: string, size: ViewSize): void {
+    const entry = this.#viewers.get(viewerId);
+    if (!entry || entry.size === size) return;
+    entry.size = size;
+    this.#applySendParameters(entry.connection, size);
+  }
+
+  #applySendParameters(connection: RTCPeerConnection, size: ViewSize): void {
     const { maxBitrateBps, degradationPreference } = this.#encoding;
 
     for (const sender of connection.getSenders()) {
@@ -233,7 +297,8 @@ export class ViewerConnectionManager {
           ? parameters.encodings
           : [{}];
         for (const encoding of parameters.encodings) {
-          encoding.maxBitrate = maxBitrateBps;
+          encoding.maxBitrate = ceilingFor(maxBitrateBps, size);
+          encoding.scaleResolutionDownBy = SCALE_FOR[size];
         }
         parameters.degradationPreference = degradationPreference;
         void sender.setParameters(parameters);

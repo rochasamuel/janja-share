@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 const KEYS = [
   "PORT",
   "SIGNALING_PORT",
+  "MAX_MEMBERS",
   "MAX_VIEWERS",
   "TURN_URL",
   "TURN_TLS_URL",
@@ -16,6 +17,13 @@ afterEach(() => {
 });
 
 describe("loadConfig", () => {
+  it("defaults maxMembers to 8 and reads it from the environment", () => {
+    delete process.env["MAX_MEMBERS"];
+    expect(loadConfig().maxMembers).toBe(8);
+    process.env["MAX_MEMBERS"] = "4";
+    expect(loadConfig().maxMembers).toBe(4);
+  });
+
   it("defaults to 8787", () => {
     expect(loadConfig().port).toBe(8787);
   });

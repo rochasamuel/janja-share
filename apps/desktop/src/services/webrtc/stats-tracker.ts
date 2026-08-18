@@ -25,6 +25,7 @@ interface VideoStats extends Counters {
   codec: string | null;
   powerEfficient: boolean | null;
   implementation: string | null;
+  qualityLimitation: string | null;
 }
 
 /**
@@ -67,6 +68,7 @@ export class StatsTracker {
       codec: video.codec,
       powerEfficient: video.powerEfficient,
       implementation: video.implementation,
+      qualityLimitation: video.qualityLimitation,
       iceState,
     };
   }
@@ -92,6 +94,7 @@ export class StatsTracker {
       codec: null,
       powerEfficient: null,
       implementation: null,
+      qualityLimitation: null,
     };
 
     // The rtp entry names its codec by id rather than carrying it, so the
@@ -132,6 +135,12 @@ export class StatsTracker {
         video.powerEfficient = booleanOrNull(
           sending ? stat["powerEfficientEncoder"] : stat["powerEfficientDecoder"],
         );
+        // Only the sender has one: a receiver does not choose what it is sent.
+        // "none" is the healthy case and is not worth carrying as a value.
+        if (sending) {
+          const reason = stringOrNull(stat["qualityLimitationReason"]);
+          video.qualityLimitation = reason === "none" ? null : reason;
+        }
         // A receiver counts its own losses; a sender only learns about them
         // from the receiver report that comes back.
         if (!sending) video.lost = numberOrUndefined(stat["packetsLost"]);

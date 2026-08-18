@@ -69,6 +69,12 @@ class FakePeerConnection {
     ] as unknown as RTCRtpSender[];
   }
 
+  remoteDescriptions: RTCSessionDescriptionInit[] = [];
+
+  async setRemoteDescription(description: RTCSessionDescriptionInit): Promise<void> {
+    this.remoteDescriptions.push(description);
+  }
+
   async createOffer(): Promise<RTCSessionDescriptionInit> {
     return { type: "offer", sdp: "v=0 offer" };
   }
@@ -87,16 +93,9 @@ class FakePeerConnection {
 function setup(quality?: (typeof QUALITY_PRESETS)[keyof typeof QUALITY_PRESETS]["profile"]) {
   const capture = fakeCapture();
   const sent: ClientMessage[] = [];
-  let listener: ((message: ServerMessage) => void) | undefined;
 
   const signaling = {
     send: (message: ClientMessage) => sent.push(message),
-    onMessage: (callback: (message: ServerMessage) => void) => {
-      listener = callback;
-      return () => {
-        listener = undefined;
-      };
-    },
   } as unknown as ConstructorParameters<typeof SharingManager>[0]["signaling"];
 
   const manager = new SharingManager({
@@ -106,24 +105,22 @@ function setup(quality?: (typeof QUALITY_PRESETS)[keyof typeof QUALITY_PRESETS][
     ...(quality ? { quality } : {}),
   });
 
-  /** Puts the manager into a live share with a room open. */
-  const openRoom = async () => {
-    await manager.start();
-    listener?.({
-      type: "room-created",
-      roomId: "AB12CD",
-      sessionId: "session-1",
-      maxViewers: 6,
-      iceServers: [],
-    } satisfies ServerMessage);
+  /** Puts the manager into a live share inside a channel. */
+  const goLive = async () => {
+    manager.setSession(PUBLISHER, [], 6);
+    return await manager.start();
   };
 
-  const addViewer = async (viewerId: string) => {
-    await listener?.({ type: "viewer-joined", viewerId } as ServerMessage);
+  const addWatcher = async (viewerId: string) => {
+    await manager.addWatcher(viewerId);
   };
 
-  return { manager, capture, sent, openRoom, addViewer };
+  const deliver = (message: ServerMessage) => manager.handleMessage(message);
+
+  return { manager, capture, sent, goLive, addWatcher, deliver };
 }
+
+const PUBLISHER = "publisher-1";
 
 const pcFor = (index: number) => FakePeerConnection.instances[index]!;
 
@@ -133,8 +130,8 @@ describe("SharingManager quality", () => {
   });
 
   it("asks capture for the starting preset's picture", async () => {
-    const { capture, openRoom } = setup(QUALITY_PRESETS.thrifty.profile);
-    await openRoom();
+    const { capture, goLive } = setup(QUALITY_PRESETS.thrifty.profile);
+    await goLive();
 
     const video = capture.requested[0]?.video as MediaTrackConstraints;
     expect(video.width).toEqual({ ideal: 1280 });
@@ -143,25 +140,28 @@ describe("SharingManager quality", () => {
   });
 
   it("defaults to automatic when no preset was given", async () => {
-    const { capture, openRoom } = setup();
-    await openRoom();
+    const { capture, goLive } = setup();
+    await goLive();
 
     const video = capture.requested[0]?.video as MediaTrackConstraints;
     expect(video.height).toEqual({ ideal: 1080 });
   });
 
   it("hands the preset's ceiling to each viewer connection", async () => {
-    const { openRoom, addViewer } = setup(QUALITY_PRESETS.smooth.profile);
-    await openRoom();
-    await addViewer("viewer-1");
+    const { manager, goLive, addWatcher } = setup(QUALITY_PRESETS.smooth.profile);
+    await goLive();
+    await addWatcher("viewer-1");
+    // Fullscreen so this stays about the preset reaching the connection. What
+    // the panel scales it down to is tested where that arithmetic lives.
+    manager.setViewerSize("viewer-1", "fullscreen");
 
     expect(pcFor(0).parameters.encodings?.[0]?.maxBitrate).toBe(12_000_000);
     expect(pcFor(0).parameters.degradationPreference).toBe("maintain-framerate");
   });
 
   it("re-sizes the live picture when the preset changes mid-share", async () => {
-    const { manager, capture, openRoom } = setup();
-    await openRoom();
+    const { manager, capture, goLive } = setup();
+    await goLive();
 
     await manager.setQuality(QUALITY_PRESETS.thrifty.profile);
 
@@ -171,9 +171,10 @@ describe("SharingManager quality", () => {
   });
 
   it("re-aims the viewers already connected", async () => {
-    const { manager, openRoom, addViewer } = setup();
-    await openRoom();
-    await addViewer("viewer-1");
+    const { manager, goLive, addWatcher } = setup();
+    await goLive();
+    await addWatcher("viewer-1");
+    manager.setViewerSize("viewer-1", "fullscreen");
     expect(pcFor(0).parameters.encodings?.[0]?.maxBitrate).toBe(8_000_000);
 
     await manager.setQuality(QUALITY_PRESETS.thrifty.profile);
@@ -185,8 +186,8 @@ describe("SharingManager quality", () => {
     // Some windows cannot change size once capture has started. Losing the
     // share over a preference change would be far worse than keeping the old
     // dimensions.
-    const { manager, capture, openRoom } = setup();
-    await openRoom();
+    const { manager, capture, goLive } = setup();
+    await goLive();
     capture.videoTrack.applyConstraints.mockRejectedValueOnce(new Error("OverconstrainedError"));
 
     await expect(manager.setQuality(QUALITY_PRESETS.sharp.profile)).resolves.toBeUndefined();
@@ -194,9 +195,9 @@ describe("SharingManager quality", () => {
   });
 
   it("remembers a preset chosen while idle and uses it on the next share", async () => {
-    const { manager, capture, openRoom } = setup();
+    const { manager, capture, goLive } = setup();
     await manager.setQuality(QUALITY_PRESETS.sharp.profile);
-    await openRoom();
+    await goLive();
 
     const video = capture.requested[0]?.video as MediaTrackConstraints;
     expect(video.height).toEqual({ ideal: 1440 });
@@ -209,15 +210,15 @@ describe("SharingManager statistics", () => {
   });
 
   it("has no reading before the first poll", async () => {
-    const { manager, openRoom } = setup();
-    await openRoom();
+    const { manager, goLive } = setup();
+    await goLive();
     expect(manager.snapshot.stats).toBeNull();
   });
 
   it("publishes what the viewers measured", async () => {
-    const { manager, openRoom, addViewer } = setup();
-    await openRoom();
-    await addViewer("viewer-1");
+    const { manager, goLive, addWatcher } = setup();
+    await goLive();
+    await addWatcher("viewer-1");
 
     const report = (bytesSent: number, timestamp: number) => [
       { type: "candidate-pair", state: "succeeded", currentRoundTripTime: 0.042 },
@@ -247,9 +248,9 @@ describe("SharingManager statistics", () => {
   });
 
   it("drops the reading when the share stops", async () => {
-    const { manager, openRoom, addViewer } = setup();
-    await openRoom();
-    await addViewer("viewer-1");
+    const { manager, goLive, addWatcher } = setup();
+    await goLive();
+    await addWatcher("viewer-1");
     pcFor(0).statsReport = [
       { type: "candidate-pair", state: "succeeded", currentRoundTripTime: 0.042 },
     ];
@@ -258,5 +259,101 @@ describe("SharingManager statistics", () => {
     await manager.stop();
 
     expect(manager.snapshot.stats).toBeNull();
+  });
+});
+
+describe("SharingManager in a channel", () => {
+  beforeEach(() => {
+    FakePeerConnection.instances = [];
+  });
+
+  it("does not create a channel when a share starts", async () => {
+    const { sent, goLive } = setup();
+    await goLive();
+    // Publishing is announced by the channel, not by this manager. Sending a
+    // membership message from here is how the two would drift apart.
+    expect(sent.filter((m) => m.type === "create-channel")).toHaveLength(0);
+    expect(sent.filter((m) => m.type === "join-channel")).toHaveLength(0);
+    expect(sent.filter((m) => m.type === "publish-start")).toHaveLength(0);
+  });
+
+  it("reports whether capture succeeded, so the caller can announce it", async () => {
+    const { goLive } = setup();
+    expect(await goLive()).toBe(true);
+  });
+
+  it("refuses to capture before a channel has been joined", async () => {
+    const { manager } = setup();
+    expect(await manager.start()).toBe(false);
+    expect(manager.snapshot.state).toBe("error");
+  });
+
+  it("builds nothing until somebody asks to watch", async () => {
+    const { goLive } = setup();
+    await goLive();
+    expect(FakePeerConnection.instances).toHaveLength(0);
+  });
+
+  it("builds exactly one connection per watcher", async () => {
+    const { goLive, addWatcher } = setup();
+    await goLive();
+    await addWatcher("viewer-1");
+    await addWatcher("viewer-2");
+    expect(FakePeerConnection.instances).toHaveLength(2);
+  });
+
+  it("ignores an answer meant for somebody else's stream", async () => {
+    const { goLive, addWatcher, deliver } = setup();
+    await goLive();
+    await addWatcher("viewer-1");
+
+    // A stream we publish is not the only one on this socket: the same member
+    // may be publishing to us at the same time.
+    await deliver({
+      type: "answer",
+      fromId: "viewer-1",
+      publisherId: "someone-else",
+      sdp: "v=0",
+    });
+    expect(pcFor(0).remoteDescriptions).toHaveLength(0);
+  });
+
+  it("accepts an answer for its own stream", async () => {
+    const { goLive, addWatcher, deliver } = setup();
+    await goLive();
+    await addWatcher("viewer-1");
+
+    await deliver({
+      type: "answer",
+      fromId: "viewer-1",
+      publisherId: PUBLISHER,
+      sdp: "v=0",
+    });
+    expect(pcFor(0).remoteDescriptions).toEqual([{ type: "answer", sdp: "v=0" }]);
+  });
+
+  it("drops one watcher without touching the others", async () => {
+    const { goLive, addWatcher, manager } = setup();
+    await goLive();
+    await addWatcher("viewer-1");
+    await addWatcher("viewer-2");
+
+    manager.removeWatcher("viewer-1");
+    expect(manager.snapshot.viewerIds).toEqual(["viewer-2"]);
+  });
+
+  it("closes every connection when the share stops", async () => {
+    const { goLive, addWatcher, manager } = setup();
+    await goLive();
+    await addWatcher("viewer-1");
+    await manager.stop();
+
+    expect(manager.snapshot.viewerIds).toEqual([]);
+    expect(manager.snapshot.state).toBe("idle");
+  });
+
+  it("does nothing with a reported size when no share is running", () => {
+    const { manager } = setup();
+    expect(() => manager.setViewerSize("ana", "fullscreen")).not.toThrow();
   });
 });

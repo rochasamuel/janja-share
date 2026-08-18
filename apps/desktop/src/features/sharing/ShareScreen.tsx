@@ -1,7 +1,12 @@
 import { useCallback, useState } from "react";
 import { Row } from "../../components/Row.js";
 import type { ConnectionQuality } from "../../services/webrtc/connection-quality.js";
-import { formatEncoder, formatNetwork, formatScreen } from "../../services/webrtc/stream-stats.js";
+import {
+  formatEncoder,
+  formatLimit,
+  formatNetwork,
+  formatScreen,
+} from "../../services/webrtc/stream-stats.js";
 import type { SharingSnapshot } from "./sharing-manager.js";
 
 /**
@@ -16,6 +21,8 @@ function networkTone(quality: Map<string, ConnectionQuality>): "ok" | "fault" | 
 
 interface Props {
   snapshot: SharingSnapshot;
+  /** The code belongs to the channel, not to this share. */
+  channelId: string | null;
   /** True while Chromium's picker is on screen. */
   picking: boolean;
   onStart: () => Promise<void>;
@@ -23,7 +30,7 @@ interface Props {
   onBack: () => void;
 }
 
-export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Props) {
+export function ShareScreen({ snapshot, channelId, picking, onStart, onStop, onBack }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
 
   const copy = useCallback((text: string, label: string) => {
@@ -78,12 +85,15 @@ export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Prop
   const screenLine = formatScreen(snapshot.stats);
   const networkLine = formatNetwork(snapshot.stats);
   const encoderLine = formatEncoder(snapshot.stats);
+  // Only ever present when something is actually wrong, which is what makes it
+  // worth a line of its own.
+  const limitLine = formatLimit(snapshot.stats);
 
   return (
     <>
       <div className="card">
-        <div className="sub">Código da sala</div>
-        <div className="code">{snapshot.roomId}</div>
+        <div className="sub">Código do canal</div>
+        <div className="code">{channelId}</div>
         <div className="meter">
           <span
             style={{
@@ -118,6 +128,15 @@ export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Prop
               : "sem som"}
         </span>
       </div>
+
+      {limitLine ? (
+        <div className="readout">
+          <span className="key">Limite</span>
+          <span className="value" data-tone="fault">
+            {limitLine}
+          </span>
+        </div>
+      ) : null}
 
       {screenLine ? (
         <div className="readout">
@@ -159,14 +178,14 @@ export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Prop
       <div className="rows">
         <Row
           icon="copy"
-          label={copied === "code" ? "Copiado" : "Copiar código da sala"}
+          label={copied === "code" ? "Copiado" : "Copiar código do canal"}
           shortcut="Ctrl C"
-          onClick={() => copy(snapshot.roomId ?? "", "code")}
+          onClick={() => copy(channelId ?? "", "code")}
         />
         <Row
           icon="link"
-          label={copied === "link" ? "Copiado" : "Copiar link para assistir"}
-          onClick={() => copy(`janjashare://room/${snapshot.roomId}`, "link")}
+          label={copied === "link" ? "Copiado" : "Copiar link do canal"}
+          onClick={() => copy(`janjashare://channel/${channelId}`, "link")}
         />
       </div>
 

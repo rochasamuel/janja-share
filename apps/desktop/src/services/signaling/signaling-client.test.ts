@@ -102,14 +102,14 @@ describe("SignalingClient", () => {
     client.connect();
     latest().open();
 
-    client.send({ type: "join-room", roomId: "7DS4B2" });
-    expect(JSON.parse(latest().sent[0]!)).toEqual({ type: "join-room", roomId: "7DS4B2" });
+    client.send({ type: "join-channel", channelId: "7DS4B2", displayName: "PC-SAM" });
+    expect(JSON.parse(latest().sent[0]!)).toEqual({ type: "join-channel", channelId: "7DS4B2", displayName: "PC-SAM" });
   });
 
   it("refuses to send before the socket is open", () => {
     const { client } = setup();
     client.connect();
-    expect(() => client.send({ type: "create-room" })).toThrow(/not connected/);
+    expect(() => client.send({ type: "create-channel", displayName: "PC-SAM" })).toThrow(/not connected/);
   });
 
   it("hands parsed messages to listeners", () => {
@@ -119,9 +119,9 @@ describe("SignalingClient", () => {
 
     client.connect();
     latest().open();
-    latest().deliver({ type: "viewer-joined", viewerId: "v1" });
+    latest().deliver({ type: "watch-request", fromId: "v1" });
 
-    expect(received).toEqual([{ type: "viewer-joined", viewerId: "v1" }]);
+    expect(received).toEqual([{ type: "watch-request", fromId: "v1" }]);
   });
 
   it("ignores an unparseable frame instead of dropping the session", () => {
@@ -254,8 +254,28 @@ describe("SignalingClient", () => {
     client.connect();
     latest().open();
     unsubscribe();
-    latest().deliver({ type: "room-ended", reason: "sharer-left" });
+    latest().deliver({ type: "member-left", memberId: "ana", reason: "left" });
 
     expect(received).toEqual([]);
+  });
+
+  it("starts the backoff over when someone retries after it gave up", () => {
+    const { client, latest, clock } = setup({ maxAttempts: 2 });
+
+    client.connect();
+    latest().drop();
+    clock.runAll();
+    latest().drop();
+    clock.runAll();
+    latest().drop();
+    expect(client.state).toBe("failed");
+
+    // The retry has to get a full budget of attempts, not the single leftover
+    // the exhausted counter would allow.
+    client.connect();
+    expect(client.state).toBe("connecting");
+
+    latest().drop();
+    expect(client.state).toBe("reconnecting");
   });
 });

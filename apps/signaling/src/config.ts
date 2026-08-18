@@ -3,6 +3,9 @@ import type { IceConfig } from "./ice-servers.js";
 export interface AppConfig {
   port: number;
   host: string;
+  /** People in one channel. */
+  maxMembers: number;
+  /** Viewers of one publisher. This is the upload ceiling, not the channel size. */
   maxViewers: number;
   ice: IceConfig;
 }
@@ -29,6 +32,7 @@ export function loadConfig(): AppConfig {
     // and the deploy is rolled back with no useful error.
     port: integer("PORT", integer("SIGNALING_PORT", 8787)),
     host: process.env["SIGNALING_HOST"] ?? "0.0.0.0",
+    maxMembers: integer("MAX_MEMBERS", 8),
     maxViewers: integer("MAX_VIEWERS", 6),
     ice: {
       stunUrl: optional("STUN_URL") ?? "stun:stun.l.google.com:19302",

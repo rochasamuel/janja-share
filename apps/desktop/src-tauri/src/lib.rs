@@ -1,6 +1,7 @@
 #[cfg(target_os = "windows")]
 mod app_audio;
 mod popover;
+mod shortcut;
 mod sources;
 mod tray;
 mod window_info;
@@ -52,8 +53,18 @@ fn set_picker_mode(
     auto_hide: State<'_, AutoHide>,
     enabled: bool,
 ) {
-    // The picker takes focus; hiding on blur now would kill it mid-choice.
-    auto_hide.0.store(!enabled, Ordering::Relaxed);
+    // Disabling only, never restoring.
+    //
+    // The picker takes focus, and hiding on blur mid-choice would kill it — so
+    // entering forces auto-hide off. Leaving used to force it back on, which
+    // is what made the panel vanish on the first alt-tab of a live share: the
+    // frontend had already set it correctly for "sharing" by the time the
+    // picker closed, and this overwrote that. Whether the panel may hide is a
+    // question about what the app is doing, and the frontend is the only place
+    // that knows.
+    if enabled {
+        auto_hide.0.store(false, Ordering::Relaxed);
+    }
 
     let Ok(mut slot) = geometry.0.lock() else {
         return;
@@ -80,6 +91,32 @@ fn set_picker_mode(
 #[tauri::command]
 fn hide_panel(window: tauri::WebviewWindow) {
     let _ = window.hide();
+}
+
+/// Lets a fullscreen stream behave like any other window.
+///
+/// The panel is `alwaysOnTop` and `skipTaskbar` because it is a popover, and
+/// both become exactly wrong the moment it fills the screen: it stays painted
+/// over whatever the user alt-tabs to, and it is not in the alt-tab list to
+/// switch back to. Together that reads as the app having seized the machine.
+///
+/// The resting values are constants from tauri.conf.json rather than something
+/// the user can change, so unlike picker mode there is no geometry to save —
+/// leaving fullscreen simply restores both.
+#[tauri::command]
+fn set_fullscreen_mode(window: tauri::WebviewWindow, enabled: bool) {
+    let _ = window.set_always_on_top(!enabled);
+    let _ = window.set_skip_taskbar(!enabled);
+}
+
+/// Brings the panel up from wherever the user was.
+///
+/// Needed by the global shortcut: pressed with no channel joined there is
+/// nothing to share into, and the honest answer is to show the panel rather
+/// than to do nothing and look broken.
+#[tauri::command]
+fn show_panel(app: tauri::AppHandle) {
+    tray::show_main_window(&app);
 }
 
 /// The running per-application audio capture, if any.
@@ -168,6 +205,19 @@ fn describe_window(label: String) -> Option<window_info::WindowInfo> {
     window_info::parse_window_label(&label).and_then(window_info::describe)
 }
 
+/// The name the rest of the channel will see.
+///
+/// `COMPUTERNAME` is what Windows itself shows in Settings, and it is what the
+/// group already uses to refer to each other's machines. Falling back to
+/// `HOSTNAME` keeps a non-Windows dev build working; an empty result is handled
+/// on the TypeScript side, which has a friendlier default than Rust does.
+#[tauri::command]
+fn machine_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_default()
+}
+
 /// Sharing must survive the panel closing, so quitting has to be explicit.
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
@@ -189,6 +239,7 @@ pub fn run() {
     }));
 
     builder
+        .plugin(shortcut::plugin())
         .manage(AutoHide(AtomicBool::new(true)))
         .manage(AudioCapture::default())
         .manage(PanelGeometry::default())
@@ -197,14 +248,24 @@ pub fn run() {
             set_auto_hide,
             set_picker_mode,
             hide_panel,
+            show_panel,
+            set_fullscreen_mode,
             describe_window,
             list_capture_sources,
             start_app_audio,
             stop_app_audio,
-            quit_app
+            quit_app,
+            machine_name
         ])
         .setup(|app| {
             tray::init(app)?;
+
+            // Survivable: another application may already own Ctrl+Alt+S, and
+            // refusing to start over a hotkey would be worse than starting
+            // without it.
+            if let Err(message) = shortcut::register(app.handle()) {
+                eprintln!("janja: {message}");
+            }
 
             if let Some(window) = app.get_webview_window("main") {
                 popover::apply_blur(&window);

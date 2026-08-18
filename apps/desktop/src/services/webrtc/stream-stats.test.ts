@@ -3,6 +3,7 @@ import type { QualitySample } from "./connection-quality.js";
 import {
   aggregateStats,
   formatEncoder,
+  formatLimit,
   formatNetwork,
   formatScreen,
   type StreamStats,
@@ -19,6 +20,7 @@ function sample(fields: Partial<QualitySample>): QualitySample {
     codec: null,
     powerEfficient: null,
     implementation: null,
+    qualityLimitation: null,
     iceState: "connected",
     ...fields,
   };
@@ -34,6 +36,7 @@ const nothing: StreamStats = {
   codec: null,
   powerEfficient: null,
   implementation: null,
+  qualityLimitation: null,
 };
 
 describe("aggregateStats", () => {
@@ -130,6 +133,38 @@ describe("formatEncoder", () => {
 
   it("shows the codec alone when efficiency is unknown", () => {
     expect(formatEncoder({ ...nothing, codec: "VP9" })).toBe("VP9");
+  });
+});
+
+describe("quality limitation", () => {
+  it("surfaces the reason one viewer's encoder is holding back", () => {
+    const stats = aggregateStats([sample({ qualityLimitation: "bandwidth" })]);
+    expect(stats?.qualityLimitation).toBe("bandwidth");
+  });
+
+  it("reports a limit that applies to anyone, not only to everyone", () => {
+    // One viewer starved is the story. Requiring all of them to agree would
+    // hide exactly the case that is going wrong.
+    const stats = aggregateStats([
+      sample({ qualityLimitation: null }),
+      sample({ qualityLimitation: "cpu" }),
+    ]);
+    expect(stats?.qualityLimitation).toBe("cpu");
+  });
+
+  it("says nothing when nothing is holding the encoder back", () => {
+    const stats = aggregateStats([sample({}), sample({})]);
+    expect(stats?.qualityLimitation).toBeNull();
+  });
+
+  it("names the two causes a person can act on differently", () => {
+    expect(formatLimit({ ...nothing, qualityLimitation: "cpu" })).toContain("CPU");
+    expect(formatLimit({ ...nothing, qualityLimitation: "bandwidth" })).toContain("banda");
+  });
+
+  it("stays absent when there is nothing wrong to report", () => {
+    expect(formatLimit(nothing)).toBeNull();
+    expect(formatLimit(null)).toBeNull();
   });
 });
 

@@ -5,13 +5,14 @@ const sample = (overrides: Partial<QualitySample> = {}): QualitySample => ({
   rttMs: 40,
   packetLossRatio: 0,
   framesPerSecond: 60,
-  // Grading ignores these three; they are carried for the readouts only.
+  // Grading ignores these; they are carried for the readouts only.
   bitrateBps: 4_000_000,
   frameWidth: 1920,
   frameHeight: 1080,
   codec: "H264",
   powerEfficient: true,
   implementation: "ExternalEncoder",
+  qualityLimitation: null,
   iceState: "connected",
   ...overrides,
 });

@@ -63,7 +63,9 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualityPresetInfo> = {
       frameRate: 15,
       maxBitrateBps: 6_000_000,
       degradationPreference: "maintain-resolution",
-      contentHint: "detail",
+      // The one preset named for text says so. "detail" protects sharpness in
+      // general; "text" is the encoder being told what the sharpness is for.
+      contentHint: "text",
     },
   },
   smooth: {
