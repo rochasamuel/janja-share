@@ -197,6 +197,7 @@ pub fn run() {
 
             if let Some(window) = app.get_webview_window("main") {
                 popover::apply_blur(&window);
+                popover::apply_rounded_corners(&window);
             }
             Ok(())
         })

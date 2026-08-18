@@ -24,6 +24,7 @@ window-vibrancy = "0.6"
 # there is one copy of the bindings rather than two.
 windows = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Dwm",
     "Win32_Media_Audio",
     "Win32_Security",
     "Win32_System_Com",

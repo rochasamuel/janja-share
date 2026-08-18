@@ -7,7 +7,9 @@
   /* Ink-violet, matching the frosted acrylic the OS puts behind it. */
   --panel-bg: rgba(26, 22, 34, 0.82);
   --panel-edge: rgba(255, 255, 255, 0.09);
-  --panel-radius: 14px;
+  /* Matches what DWM draws for DWMWCP_ROUND. A larger radius here would let
+     the frosted backdrop show through at the corners as grey squares. */
+  --panel-radius: 8px;
 
   --row-hover: rgba(255, 255, 255, 0.06);
   --hairline: rgba(255, 255, 255, 0.07);

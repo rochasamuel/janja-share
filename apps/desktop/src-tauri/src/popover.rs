@@ -26,6 +26,40 @@ pub fn apply_blur<R: Runtime>(window: &WebviewWindow<R>) {
     let _ = window;
 }
 
+/// Asks Windows to round the window itself.
+///
+/// Without this the frosted backdrop fills the full rectangle, so the panel's
+/// CSS corners sit on top of grey square ones. Rounding has to happen at the
+/// window level for the backdrop to be clipped with it.
+///
+/// The CSS radius is matched to what DWM draws; a larger one would leave the
+/// backdrop showing in the gap.
+pub fn apply_rounded_corners<R: Runtime>(window: &WebviewWindow<R>) {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::Graphics::Dwm::{
+            DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+        };
+
+        let Ok(handle) = window.hwnd() else { return };
+        let hwnd = HWND(handle.0 as *mut core::ffi::c_void);
+        let preference = DWMWCP_ROUND;
+
+        unsafe {
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                &preference as *const _ as *const core::ffi::c_void,
+                std::mem::size_of_val(&preference) as u32,
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = window;
+}
+
 /// Places the panel next to the tray icon, the way a menu bar popover sits
 /// under its icon.
 ///

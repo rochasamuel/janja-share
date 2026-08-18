@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Row } from "../../components/Row.js";
 import { setAutoHide, setPickerMode } from "../../services/panel.js";
 import type { SharingSnapshot } from "./sharing-manager.js";
@@ -12,6 +12,9 @@ interface Props {
 
 export function ShareScreen({ snapshot, onStart, onStop, onBack }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  /** Stops the picker reopening forever once the user cancels it. */
+  const attempted = useRef(false);
 
   const copy = useCallback((text: string, label: string) => {
     void navigator.clipboard.writeText(text).then(() => {
@@ -20,13 +23,11 @@ export function ShareScreen({ snapshot, onStart, onStop, onBack }: Props) {
     });
   }, []);
 
-  const [picking, setPicking] = useState(false);
-
   const start = useCallback(async () => {
-    // Grow the window first: the picker renders inside the webview, so it has
-    // to have somewhere to render before it opens. set_picker_mode also pins
-    // the panel open, since the picker steals focus.
+    attempted.current = true;
     setPicking(true);
+    // Resize before asking: the picker is painted inside the webview, so the
+    // room has to exist before it opens or it opens clipped.
     await setPickerMode(true);
     try {
       await onStart();
@@ -36,14 +37,25 @@ export function ShareScreen({ snapshot, onStart, onStop, onBack }: Props) {
     }
   }, [onStart]);
 
-  useEffect(() => () => {
-    void setPickerMode(false);
-    void setAutoHide(true);
-  }, []);
+  // Choosing "Share my screen" is already the decision. A screen that only
+  // says "click here to choose" makes the user decide twice, and the window
+  // resizing between those two clicks is what made it feel broken.
+  useEffect(() => {
+    if (attempted.current) return;
+    if (snapshot.state === "idle") void start();
+  }, [snapshot.state, start]);
 
-  if (picking) {
-    // The picker paints over this. What shows around it is our own frame, so
-    // the moment reads as part of the app rather than a browser interrupting.
+  useEffect(
+    () => () => {
+      void setPickerMode(false);
+      void setAutoHide(true);
+    },
+    [],
+  );
+
+  if (picking || snapshot.state === "starting") {
+    // Chromium paints its picker over this. What shows around it is our own
+    // frame, so the moment reads as part of the app.
     return (
       <div className="picking">
         <div className="picking-title">Choose what to share</div>
@@ -56,16 +68,16 @@ export function ShareScreen({ snapshot, onStart, onStop, onBack }: Props) {
   }
 
   if (snapshot.state !== "sharing") {
+    // Only reached after a cancel or a failure, never as a first step.
     return (
       <>
         <div className="card">
-          <div className="headline">Share your screen</div>
-          <div className="sub">Windows will ask what to share</div>
-        </div>
-
-        <div className="notice" data-tone="warn">
-          Turn on the audio option in the Windows picker before choosing, or
-          your friends watch in silence. It can't be switched on afterwards.
+          <div className="headline">
+            {snapshot.state === "error" ? "That didn't work" : "Nothing selected"}
+          </div>
+          {snapshot.state === "error" ? null : (
+            <div className="sub">You closed the picker without choosing</div>
+          )}
         </div>
 
         {snapshot.state === "error" && snapshot.message ? (
@@ -76,12 +88,7 @@ export function ShareScreen({ snapshot, onStart, onStop, onBack }: Props) {
         <div className="divider" />
 
         <div className="rows">
-          <Row
-            icon="share"
-            label={snapshot.state === "starting" ? "Waiting for you to choose…" : "Choose what to share"}
-            disabled={snapshot.state === "starting"}
-            onClick={() => void start()}
-          />
+          <Row icon="share" label="Try again" onClick={() => void start()} />
           <Row icon="back" label="Back" shortcut="Esc" onClick={onBack} />
         </div>
       </>
