@@ -9,6 +9,7 @@ export type IconName =
   | "watch"
   | "pulse"
   | "stop"
+  | "leave"
   | "copy"
   | "link"
   | "expand"
@@ -58,10 +59,23 @@ const PATHS: Record<IconName, JSX.Element> = {
     </>
   ),
   pulse: <path d="M1.5 8h3l2-4.5L9.5 12l1.6-4h3.4" />,
+  // A square inside a circle: the universal stop. Ending a transmission.
   stop: (
     <>
       <circle cx="8" cy="8" r="6.5" />
       <rect x="5.8" y="5.8" width="4.4" height="4.4" rx="0.8" />
+    </>
+  ),
+  /**
+   * A cross inside a circle: leaving, not stopping.
+   *
+   * Walking out of a channel is not the same act as ending a stream, and the
+   * two sat side by side wearing the same glyph.
+   */
+  leave: (
+    <>
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M6 6l4 4M10 6l-4 4" />
     </>
   ),
   copy: (

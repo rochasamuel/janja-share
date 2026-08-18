@@ -162,119 +162,126 @@ export function App() {
         </span>
       </header>
 
-      {offline ? (
-        <div className="notice">
-          {signalingState === "failed" ? (
-            <>
-              Não foi possível falar com o servidor. Confira se ele está no ar.
-              {/* Without this the only way back is restarting the app: the
-                  backoff has spent its attempts and will not try again. */}
-              <button className="inline-retry" type="button" onClick={retry}>
-                Tentar de novo
-              </button>
-            </>
-          ) : (
-            "Reconectando…"
-          )}
-        </div>
-      ) : null}
+      {/* One scrolling column below the header. The panel itself stays
+          overflow:hidden so it keeps clipping its rounded corners over the
+          transparent window; a fixed 440px tray popover cannot show a long
+          member list plus the rows under it, and what did not fit was simply
+          unreachable. */}
+      <div className="screen">
+        {offline ? (
+          <div className="notice">
+            {signalingState === "failed" ? (
+              <>
+                Não foi possível falar com o servidor. Confira se ele está no ar.
+                {/* Without this the only way back is restarting the app: the
+                    backoff has spent its attempts and will not try again. */}
+                <button className="inline-retry" type="button" onClick={retry}>
+                  Tentar de novo
+                </button>
+              </>
+            ) : (
+              "Reconectando…"
+            )}
+          </div>
+        ) : null}
 
-      {screen === "home" ? (
-        <HomeScreen
-          onCreate={() => {
-            // The click is the decision. The wait gets its own screen, and the
-            // effect above moves on to the member list once the server answers.
-            setScreen("creating");
-            void channel.create();
-          }}
-          onJoin={() => setScreen("join")}
-          onOpenChannel={toChannel}
-          onDiagnostics={() => setScreen("diagnostics")}
-          onQuality={() => setScreen("quality")}
-          channelId={channel.channel.channelId}
-          memberCount={channel.channel.members.length + 1}
-          publishing={live}
-          watchingName={watching ? channel.viewing.publisherName : null}
-        />
-      ) : null}
+        {screen === "home" ? (
+          <HomeScreen
+            onCreate={() => {
+              // The click is the decision. The wait gets its own screen, and the
+              // effect above moves on to the member list once the server answers.
+              setScreen("creating");
+              void channel.create();
+            }}
+            onJoin={() => setScreen("join")}
+            onOpenChannel={toChannel}
+            onDiagnostics={() => setScreen("diagnostics")}
+            onQuality={() => setScreen("quality")}
+            channelId={channel.channel.channelId}
+            memberCount={channel.channel.members.length + 1}
+            publishing={live}
+            watchingName={watching ? channel.viewing.publisherName : null}
+          />
+        ) : null}
 
-      {screen === "creating" ? (
-        <CreatingScreen
-          state={channel.channel.state}
-          message={channel.channel.message}
-          onRetry={() => void channel.create()}
-          onBack={home}
-        />
-      ) : null}
+        {screen === "creating" ? (
+          <CreatingScreen
+            state={channel.channel.state}
+            message={channel.channel.message}
+            onRetry={() => void channel.create()}
+            onBack={home}
+          />
+        ) : null}
 
-      {screen === "join" ? (
-        <JoinScreen
-          state={channel.channel.state}
-          message={channel.channel.message}
-          onJoin={(code) => void channel.join(code)}
-          onBack={home}
-        />
-      ) : null}
+        {screen === "join" ? (
+          <JoinScreen
+            state={channel.channel.state}
+            message={channel.channel.message}
+            onJoin={(code) => void channel.join(code)}
+            onBack={home}
+          />
+        ) : null}
 
-      {screen === "channel" ? (
-        <ChannelScreen
-          channel={channel.channel}
-          sharing={channel.sharing}
-          viewing={channel.viewing}
-          onPublish={() => {
-            // The picker is painted by ShareScreen, so the move has to happen
-            // before capture starts or the user chooses against a blank panel.
-            setScreen("share");
-            void channel.startPublishing();
-          }}
-          onStopPublishing={() => void channel.stopPublishing()}
-          onShareDetails={() => setScreen("share")}
-          onWatch={(publisherId) => {
-            channel.watch(publisherId);
-            setScreen("watch");
-          }}
-          onOpenStream={() => setScreen("watch")}
-          onLeave={() => {
-            channel.leave();
-            home();
-          }}
-          onBack={home}
-        />
-      ) : null}
+        {screen === "channel" ? (
+          <ChannelScreen
+            channel={channel.channel}
+            sharing={channel.sharing}
+            viewing={channel.viewing}
+            onPublish={() => {
+              // The picker is painted by ShareScreen, so the move has to happen
+              // before capture starts or the user chooses against a blank panel.
+              setScreen("share");
+              void channel.startPublishing();
+            }}
+            onStopPublishing={() => void channel.stopPublishing()}
+            onShareDetails={() => setScreen("share")}
+            onWatch={(publisherId) => {
+              channel.watch(publisherId);
+              setScreen("watch");
+            }}
+            onOpenStream={() => setScreen("watch")}
+            onLeave={() => {
+              channel.leave();
+              home();
+            }}
+            onBack={home}
+          />
+        ) : null}
 
-      {screen === "share" ? (
-        <ShareScreen
-          snapshot={channel.sharing}
-          channelId={channel.channel.channelId}
-          picking={channel.picking}
-          onStart={channel.startPublishing}
-          onStop={channel.stopPublishing}
-          onBack={toChannel}
-        />
-      ) : null}
+        {screen === "share" ? (
+          <ShareScreen
+            snapshot={channel.sharing}
+            channelId={channel.channel.channelId}
+            picking={channel.picking}
+            onStart={channel.startPublishing}
+            onStop={channel.stopPublishing}
+            onBack={toChannel}
+          />
+        ) : null}
 
-      {screen === "watch" ? (
-        <WatchScreen
-          snapshot={channel.viewing}
-          attachVideo={channel.attachVideo}
-          onStop={() => {
-            channel.stopWatching();
-            toChannel();
-          }}
-          onBack={toChannel}
-        />
-      ) : null}
+        {screen === "watch" ? (
+          <WatchScreen
+            snapshot={channel.viewing}
+            attachVideo={channel.attachVideo}
+            onStop={() => {
+              channel.stopWatching();
+              toChannel();
+            }}
+            onBack={toChannel}
+          />
+        ) : null}
 
-      {screen === "diagnostics" ? <DiagnosticsScreen onBack={home} /> : null}
+        {screen === "diagnostics" ? <DiagnosticsScreen onBack={home} /> : null}
 
-      {screen === "quality" ? (
-        <QualityScreen
-          preset={channel.preset}
-          sharing={live}
-          onSelect={channel.setPreset}
-          onBack={home}
-        />
-      ) : null}
+        {screen === "quality" ? (
+          <QualityScreen
+            preset={channel.preset}
+            sharing={live}
+            onSelect={channel.setPreset}
+            onBack={home}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

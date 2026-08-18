@@ -333,6 +333,54 @@ body {
   color: #ffd9a3;
 }
 
+/* --- the scrolling body ----------------------------------------------- */
+
+/* Everything under the header. The header stays put — it is the drag handle
+   and the status light — and the rest scrolls when it does not fit. */
+.screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Reaching the end here must not start scrolling whatever is behind the
+     popover. */
+  overscroll-behavior: contain;
+}
+
+/* Narrow and dim: the panel is 320px wide and a stock scrollbar eats a
+   noticeable slice of it. */
+.screen::-webkit-scrollbar {
+  width: 8px;
+}
+
+.screen::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+.screen::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* A flex item in a column shrinks by default, so without this the member
+   list would be squeezed into whatever space was left instead of overflowing
+   — and a squeezed list never produces a scrollbar. */
+.screen > * {
+  flex: none;
+}
+
+/* The two that are meant to take the slack: the spacer that pushes the
+   footer rows down, and the diagnostics log. */
+.screen > .grow {
+  flex: 1;
+}
+
+.screen > .log {
+  flex: 1;
+  min-height: 140px;
+}
+
 /* --- misc ------------------------------------------------------------- */
 
 .grow {
@@ -426,11 +474,6 @@ body {
 .picking-hint strong {
   color: var(--ink);
   font-weight: 600;
-}
-
-.members {
-  max-height: 190px;
-  overflow-y: auto;
 }
 
 .member {

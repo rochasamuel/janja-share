@@ -124,7 +124,7 @@ export function ChannelScreen({
           shortcut="Ctrl C"
           onClick={copyCode}
         />
-        <Row icon="stop" tone="danger" label="Sair do canal" onClick={onLeave} />
+        <Row icon="leave" tone="danger" label="Sair do canal" onClick={onLeave} />
         <Row icon="back" label="Voltar" shortcut="Esc" onClick={onBack} />
       </div>
     </>
