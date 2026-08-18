@@ -209,6 +209,11 @@ export class ChannelManager {
         return;
       }
 
+      case "view-size": {
+        this.#options.sharing.setViewerSize(message.fromId, message.size);
+        return;
+      }
+
       case "offer": {
         await this.#options.viewing.handleMessage(message);
         return;

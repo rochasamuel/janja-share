@@ -347,4 +347,9 @@ describe("SharingManager in a channel", () => {
     expect(manager.snapshot.viewerIds).toEqual([]);
     expect(manager.snapshot.state).toBe("idle");
   });
+
+  it("does nothing with a reported size when no share is running", () => {
+    const { manager } = setup();
+    expect(() => manager.setViewerSize("ana", "fullscreen")).not.toThrow();
+  });
 });

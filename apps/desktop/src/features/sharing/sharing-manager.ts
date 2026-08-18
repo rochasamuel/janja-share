@@ -1,4 +1,4 @@
-import type { IceServer, ServerMessage } from "@janja/signaling-protocol";
+import type { IceServer, ServerMessage, ViewSize } from "@janja/signaling-protocol";
 import type { SignalingClient } from "../../services/signaling/signaling-client.js";
 import { QUALITY_PRESETS, type QualityProfile } from "../../services/settings.js";
 import type { ConnectionQuality } from "../../services/webrtc/connection-quality.js";
@@ -225,6 +225,16 @@ export class SharingManager {
     this.#viewers?.removeViewer(viewerId);
     this.#quality.delete(viewerId);
     this.#emit();
+  }
+
+  /**
+   * A viewer reported how much picture it can show.
+   *
+   * No emit: this changes what leaves the machine, not anything the panel
+   * displays, and the readout already reports the resolution on the wire.
+   */
+  setViewerSize(viewerId: string, size: ViewSize): void {
+    this.#viewers?.setViewerSize(viewerId, size);
   }
 
   /**

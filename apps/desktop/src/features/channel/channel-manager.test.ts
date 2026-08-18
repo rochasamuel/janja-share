@@ -36,6 +36,7 @@ function setup() {
     stop: vi.fn(async () => {}),
     addWatcher: vi.fn(async () => {}),
     removeWatcher: vi.fn(),
+    setViewerSize: vi.fn(),
     handleMessage: vi.fn(async () => {}),
   };
 
@@ -230,6 +231,15 @@ describe("ChannelManager", () => {
 
     deliver({ type: "unwatch", fromId: "ana" });
     expect(sharing.removeWatcher).toHaveBeenCalledWith("ana");
+  });
+
+  it("hands a viewer's reported size to the sharing manager", async () => {
+    const { manager, joined, deliver, sharing } = setup();
+    await manager.create();
+    joined();
+
+    deliver({ type: "view-size", fromId: "ana", size: "fullscreen" });
+    expect(sharing.setViewerSize).toHaveBeenCalledWith("ana", "fullscreen");
   });
 
   it("drops a departed member's connection from both sides", async () => {
