@@ -65,15 +65,7 @@ class FakePeerConnection {
 function setup() {
   const sent: ClientMessage[] = [];
   const streams: (MediaStream | null)[] = [];
-  let deliver: (message: ServerMessage) => void = () => {};
-
   const signaling = {
-    onMessage: (listener: (message: ServerMessage) => void) => {
-      deliver = listener;
-      return () => {
-        deliver = () => {};
-      };
-    },
     send: (message: ClientMessage) => sent.push(message),
   } as unknown as SignalingClient;
 
@@ -82,10 +74,12 @@ function setup() {
     createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
     onStream: (stream) => streams.push(stream),
   });
+  manager.setSession([]);
 
-  return { manager, sent, streams, deliver: (m: ServerMessage) => deliver(m) };
+  return { manager, sent, streams, deliver: (m: ServerMessage) => manager.handleMessage(m) };
 }
 
+const PUBLISHER = "publisher-1";
 const pc = () => FakePeerConnection.instances.at(-1)!;
 const fakeStream = () => ({ id: "remote" }) as unknown as MediaStream;
 
@@ -94,31 +88,29 @@ describe("ViewingManager", () => {
     FakePeerConnection.instances = [];
   });
 
-  it("asks to join and reports connecting", () => {
+  it("asks the server to watch, and nothing else", () => {
     const { manager, sent } = setup();
-    manager.join("7DS4B2");
+    manager.watch(PUBLISHER, "PC-SAM");
 
-    expect(sent).toEqual([{ type: "join-room", roomId: "7DS4B2" }]);
+    expect(sent).toEqual([{ type: "watch", publisherId: PUBLISHER }]);
     expect(manager.snapshot.state).toBe("connecting");
-    expect(manager.snapshot.roomId).toBe("7DS4B2");
+    expect(manager.snapshot.publisherName).toBe("PC-SAM");
   });
 
   it("answers the sharer's offer", async () => {
     const { manager, sent, deliver } = setup();
-    manager.join("7DS4B2");
-    deliver({ type: "room-joined", roomId: "7DS4B2", sessionId: "v1", sharerId: "s1", iceServers: [] });
+    manager.watch(PUBLISHER, "PC-SAM");
 
-    await deliver({ type: "offer", fromId: "s1", sdp: "v=0 offer" });
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
     await vi.waitFor(() => expect(sent).toHaveLength(2));
 
-    expect(sent[1]).toEqual({ type: "answer", targetId: "s1", sdp: "v=0 answer" });
+    expect(sent[1]).toEqual({ type: "answer", targetId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 answer" });
   });
 
   it("hands the incoming stream to the player", async () => {
     const { manager, streams, deliver } = setup();
-    manager.join("7DS4B2");
-    deliver({ type: "room-joined", roomId: "7DS4B2", sessionId: "v1", sharerId: "s1", iceServers: [] });
-    await deliver({ type: "offer", fromId: "s1", sdp: "v=0 offer" });
+    manager.watch(PUBLISHER, "PC-SAM");
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
 
     const remote = fakeStream();
     pc().emitTrack(remote);
@@ -128,47 +120,48 @@ describe("ViewingManager", () => {
 
   it("buffers candidates that arrive before the offer", async () => {
     const { manager, deliver } = setup();
-    manager.join("7DS4B2");
-    deliver({ type: "room-joined", roomId: "7DS4B2", sessionId: "v1", sharerId: "s1", iceServers: [] });
+    manager.watch(PUBLISHER, "PC-SAM");
 
     // WebRTC rejects a candidate before a remote description exists, so an
     // early one must be held rather than dropped.
-    await deliver({ type: "ice-candidate", fromId: "s1", candidate: { candidate: "early" } });
-    await deliver({ type: "offer", fromId: "s1", sdp: "v=0 offer" });
+    await deliver({ type: "ice-candidate", fromId: PUBLISHER, publisherId: PUBLISHER, candidate: { candidate: "early" } });
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
 
     await vi.waitFor(() => expect(pc().addedCandidates).toEqual([{ candidate: "early" }]));
   });
 
   it("applies candidates directly once the offer is in place", async () => {
     const { manager, deliver } = setup();
-    manager.join("7DS4B2");
-    deliver({ type: "room-joined", roomId: "7DS4B2", sessionId: "v1", sharerId: "s1", iceServers: [] });
-    await deliver({ type: "offer", fromId: "s1", sdp: "v=0 offer" });
+    manager.watch(PUBLISHER, "PC-SAM");
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
 
-    await deliver({ type: "ice-candidate", fromId: "s1", candidate: { candidate: "late" } });
+    await deliver({ type: "ice-candidate", fromId: PUBLISHER, publisherId: PUBLISHER, candidate: { candidate: "late" } });
 
     await vi.waitFor(() => expect(pc().addedCandidates).toEqual([{ candidate: "late" }]));
   });
 
   it("sends its own candidates to the sharer", async () => {
     const { manager, sent, deliver } = setup();
-    manager.join("7DS4B2");
-    deliver({ type: "room-joined", roomId: "7DS4B2", sessionId: "v1", sharerId: "s1", iceServers: [] });
-    await deliver({ type: "offer", fromId: "s1", sdp: "v=0 offer" });
+    manager.watch(PUBLISHER, "PC-SAM");
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
     sent.length = 0;
 
     pc().emitCandidate({ candidate: "mine" });
 
     expect(sent).toEqual([
-      { type: "ice-candidate", targetId: "s1", candidate: { candidate: "mine" } },
+      {
+        type: "ice-candidate",
+        targetId: PUBLISHER,
+        publisherId: PUBLISHER,
+        candidate: { candidate: "mine" },
+      },
     ]);
   });
 
   it("tracks the connection lifecycle", async () => {
     const { manager, deliver } = setup();
-    manager.join("7DS4B2");
-    deliver({ type: "room-joined", roomId: "7DS4B2", sessionId: "v1", sharerId: "s1", iceServers: [] });
-    await deliver({ type: "offer", fromId: "s1", sdp: "v=0 offer" });
+    manager.watch(PUBLISHER, "PC-SAM");
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
 
     pc().transitionTo("connected");
     expect(manager.snapshot.state).toBe("connected");
@@ -183,51 +176,38 @@ describe("ViewingManager", () => {
 
   it("reuses the same connection for an ice restart's re-offer", async () => {
     const { manager, deliver } = setup();
-    manager.join("7DS4B2");
-    deliver({ type: "room-joined", roomId: "7DS4B2", sessionId: "v1", sharerId: "s1", iceServers: [] });
-    await deliver({ type: "offer", fromId: "s1", sdp: "v=0 offer" });
-    await deliver({ type: "offer", fromId: "s1", sdp: "v=0 restart" });
+    manager.watch(PUBLISHER, "PC-SAM");
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 restart" });
 
     await vi.waitFor(() => expect(FakePeerConnection.instances).toHaveLength(1));
   });
 
-  it("says plainly when the sharer stops", async () => {
+  it("says plainly when the publisher stops", async () => {
     const { manager, deliver } = setup();
-    manager.join("7DS4B2");
-    deliver({ type: "room-joined", roomId: "7DS4B2", sessionId: "v1", sharerId: "s1", iceServers: [] });
-    await deliver({ type: "offer", fromId: "s1", sdp: "v=0 offer" });
+    manager.watch(PUBLISHER, "PC-SAM");
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
 
-    deliver({ type: "room-ended", reason: "sharer-left" });
+    await deliver({ type: "member-publishing", memberId: PUBLISHER, publishing: false });
 
     expect(manager.snapshot.state).toBe("disconnected");
-    expect(manager.snapshot.message).toBe("A transmissão foi encerrada.");
+    expect(manager.snapshot.message).toBe("PC-SAM parou de compartilhar.");
     expect(pc().closed).toBe(true);
   });
 
-  it("translates server errors into something a person can act on", () => {
-    const cases = [
-      { code: "ROOM_NOT_FOUND", expected: "Esse código não corresponde a nenhuma transmissão ao vivo." },
-      { code: "ROOM_FULL", expected: "Esta transmissão está lotada." },
-    ] as const;
+  it("surfaces a failure the channel hands it", () => {
+    const { manager } = setup();
+    manager.watch(PUBLISHER, "PC-SAM");
+    manager.fail("Essa transmissão está lotada.");
 
-    for (const { code, expected } of cases) {
-      const { manager, deliver } = setup();
-      manager.join("7DS4B2");
-      deliver({ type: "error", code, message: "raw server text" });
-      expect(manager.snapshot.message).toBe(expected);
-      expect(manager.snapshot.state).toBe("error");
-    }
+    expect(manager.snapshot.state).toBe("error");
+    expect(manager.snapshot.message).toBe("Essa transmissão está lotada.");
   });
 
   it("reports a failure when the offer cannot be applied", async () => {
     const sent: ClientMessage[] = [];
-    let deliver: (message: ServerMessage) => void = () => {};
     const manager = new ViewingManager({
       signaling: {
-        onMessage: (listener: (m: ServerMessage) => void) => {
-          deliver = listener;
-          return () => {};
-        },
         send: (m: ClientMessage) => sent.push(m),
       } as unknown as SignalingClient,
       createPeerConnection: () => {
@@ -237,9 +217,14 @@ describe("ViewingManager", () => {
       },
     });
 
-    manager.join("7DS4B2");
-    deliver({ type: "room-joined", roomId: "7DS4B2", sessionId: "v1", sharerId: "s1", iceServers: [] });
-    await deliver({ type: "offer", fromId: "s1", sdp: "garbage" });
+    manager.setSession([]);
+    manager.watch(PUBLISHER, "PC-SAM");
+    await manager.handleMessage({
+      type: "offer",
+      fromId: PUBLISHER,
+      publisherId: PUBLISHER,
+      sdp: "garbage",
+    });
 
     await vi.waitFor(() => expect(manager.snapshot.state).toBe("error"));
     expect(manager.snapshot.message).toBe("Não foi possível conectar à transmissão.");
@@ -247,24 +232,67 @@ describe("ViewingManager", () => {
 
   it("tears everything down on leave", async () => {
     const { manager, sent, streams, deliver } = setup();
-    manager.join("7DS4B2");
-    deliver({ type: "room-joined", roomId: "7DS4B2", sessionId: "v1", sharerId: "s1", iceServers: [] });
-    await deliver({ type: "offer", fromId: "s1", sdp: "v=0 offer" });
+    manager.watch(PUBLISHER, "PC-SAM");
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
     sent.length = 0;
 
-    manager.leave();
+    manager.stop();
 
-    expect(sent).toEqual([{ type: "leave-room" }]);
+    expect(sent).toEqual([{ type: "unwatch", publisherId: PUBLISHER }]);
     expect(pc().closed).toBe(true);
     expect(streams.at(-1)).toBeNull();
     expect(manager.snapshot.state).toBe("idle");
   });
 
-  it("ignores a second join while already connecting", () => {
+  it("ignores a second watch while already connecting", () => {
     const { manager, sent } = setup();
-    manager.join("7DS4B2");
-    manager.join("X92KD1");
+    manager.watch(PUBLISHER, "PC-SAM");
+    manager.watch("publisher-2", "PC-ANA");
 
     expect(sent).toHaveLength(1);
+  });
+
+  it("ignores an offer for a stream it did not ask for", async () => {
+    const { manager, sent, deliver } = setup();
+    manager.watch(PUBLISHER, "PC-SAM");
+    sent.length = 0;
+
+    // This is what a member publishing to us at the same time looks like: an
+    // offer on the same socket that has nothing to do with what we watch.
+    await deliver({ type: "offer", fromId: "publisher-2", publisherId: "publisher-2", sdp: "v=0" });
+    expect(sent.filter((m) => m.type === "answer")).toHaveLength(0);
+  });
+
+  it("ignores a candidate belonging to the stream we publish", async () => {
+    const { manager, deliver } = setup();
+    manager.watch(PUBLISHER, "PC-SAM");
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
+    const before = pc().addedCandidates.length;
+
+    await deliver({
+      type: "ice-candidate",
+      fromId: "viewer-9",
+      publisherId: "self-1",
+      candidate: { candidate: "not ours" },
+    });
+    expect(pc().addedCandidates).toHaveLength(before);
+  });
+
+  it("ends the picture when the publisher leaves the channel", async () => {
+    const { manager, deliver } = setup();
+    manager.watch(PUBLISHER, "PC-SAM");
+    await deliver({ type: "offer", fromId: PUBLISHER, publisherId: PUBLISHER, sdp: "v=0 offer" });
+
+    await deliver({ type: "member-left", memberId: PUBLISHER, reason: "disconnected" });
+    expect(manager.snapshot.state).toBe("disconnected");
+    expect(manager.snapshot.message).toBe("PC-SAM saiu do canal.");
+  });
+
+  it("ignores a departure that is not the publisher it watches", async () => {
+    const { manager, deliver } = setup();
+    manager.watch(PUBLISHER, "PC-SAM");
+
+    await deliver({ type: "member-left", memberId: "publisher-2", reason: "left" });
+    expect(manager.snapshot.state).toBe("connecting");
   });
 });

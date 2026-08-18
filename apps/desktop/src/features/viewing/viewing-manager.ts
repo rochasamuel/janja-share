@@ -17,7 +17,8 @@ export type ViewingState =
 
 export interface ViewingSnapshot {
   state: ViewingState;
-  roomId: string | null;
+  publisherId: string | null;
+  publisherName: string | null;
   quality: ConnectionQuality;
   /** The measurements behind that verdict, or null before the first poll. */
   stats: StreamStats | null;
@@ -40,14 +41,13 @@ export class ViewingManager {
   readonly #stats = new StatsTracker("receive");
 
   #connection: RTCPeerConnection | undefined;
-  #unsubscribeSignaling: (() => void) | undefined;
-  #sharerId: string | null = null;
   #iceServers: IceServer[] = [];
   /** Candidates that arrive before the offer does; WebRTC rejects those. */
   #pendingCandidates: RTCIceCandidateInit[] = [];
 
   #state: ViewingState = "idle";
-  #roomId: string | null = null;
+  #publisherId: string | null = null;
+  #publisherName: string | null = null;
   #quality: ConnectionQuality = "reconnecting";
   #streamStats: StreamStats | null = null;
   #message: string | null = null;
@@ -59,35 +59,57 @@ export class ViewingManager {
   get snapshot(): ViewingSnapshot {
     return {
       state: this.#state,
-      roomId: this.#roomId,
+      publisherId: this.#publisherId,
+      publisherName: this.#publisherName,
       quality: this.#quality,
       stats: this.#streamStats,
       message: this.#message,
     };
   }
 
-  join(roomId: string): void {
-    if (this.#state === "connecting" || this.#state === "connected") return;
-
-    this.#roomId = roomId;
-    this.#setState("connecting", null);
-
-    this.#unsubscribeSignaling = this.#options.signaling.onMessage((message) => {
-      void this.#handleSignalingMessage(message);
-    });
-
-    this.#options.signaling.send({ type: "join-room", roomId });
+  /** Told to us by the channel on join, and again after a reconnect. */
+  setSession(iceServers: IceServer[]): void {
+    this.#iceServers = iceServers;
   }
 
-  leave(): void {
+  /**
+   * The click. Nothing was connected before this, and the publisher builds the
+   * connection — we only answer.
+   */
+  watch(publisherId: string, publisherName: string): void {
+    if (this.#state === "connecting" || this.#state === "connected") return;
+
+    this.#publisherId = publisherId;
+    this.#publisherName = publisherName;
+    this.#setState("connecting", null);
+
     try {
-      this.#options.signaling.send({ type: "leave-room" });
+      this.#options.signaling.send({ type: "watch", publisherId });
     } catch {
-      // Nothing to tell the server if the socket is already gone.
+      this.#setState("error", "Sem conexão com o servidor.");
+    }
+  }
+
+  stop(): void {
+    const publisherId = this.#publisherId;
+    if (publisherId !== null) {
+      try {
+        this.#options.signaling.send({ type: "unwatch", publisherId });
+      } catch {
+        // Nothing to tell the server if the socket is already gone; it drops
+        // the subscription when the socket does.
+      }
     }
     this.#cleanup();
-    this.#roomId = null;
+    this.#publisherId = null;
+    this.#publisherName = null;
     this.#setState("idle", null);
+  }
+
+  /** The channel routes a server error here while we are still connecting. */
+  fail(message: string): void {
+    this.#cleanup();
+    this.#setState("error", message);
   }
 
   async pollQuality(): Promise<void> {
@@ -107,33 +129,41 @@ export class ViewingManager {
     this.#emit();
   }
 
-  async #handleSignalingMessage(message: ServerMessage): Promise<void> {
-    switch (message.type) {
-      case "room-joined": {
-        this.#sharerId = message.sharerId;
-        this.#iceServers = message.iceServers;
-        return;
-      }
+  /**
+   * Handles only what belongs to the one stream we are watching.
+   *
+   * Every check against `#publisherId` matters: the same socket carries the
+   * stream we publish, and an answer or a candidate from that connection must
+   * never reach this one.
+   */
+  async handleMessage(message: ServerMessage): Promise<void> {
+    const publisherId = this.#publisherId;
+    if (publisherId === null) return;
 
+    switch (message.type) {
       case "offer": {
-        await this.#acceptOffer(message.fromId, message.sdp);
+        if (message.publisherId !== publisherId) return;
+        await this.#acceptOffer(publisherId, message.sdp);
         return;
       }
 
       case "ice-candidate": {
+        if (message.publisherId !== publisherId) return;
         await this.#addCandidate(message.candidate);
         return;
       }
 
-      case "room-ended": {
+      case "member-publishing": {
+        if (message.memberId !== publisherId || message.publishing) return;
         this.#cleanup();
-        this.#setState("disconnected", "A transmissão foi encerrada.");
+        this.#setState("disconnected", `${this.#publisherName} parou de compartilhar.`);
         return;
       }
 
-      case "error": {
+      case "member-left": {
+        if (message.memberId !== publisherId) return;
         this.#cleanup();
-        this.#setState("error", viewerErrorMessage(message.code, message.message));
+        this.#setState("disconnected", `${this.#publisherName} saiu do canal.`);
         return;
       }
 
@@ -164,6 +194,7 @@ export class ViewingManager {
       this.#options.signaling.send({
         type: "answer",
         targetId: fromId,
+        publisherId: fromId,
         sdp: answer.sdp ?? "",
       });
     } catch {
@@ -193,11 +224,13 @@ export class ViewingManager {
     };
 
     connection.onicecandidate = (event) => {
-      if (!event.candidate || !this.#sharerId) return;
+      const publisherId = this.#publisherId;
+      if (!event.candidate || publisherId === null) return;
       try {
         this.#options.signaling.send({
           type: "ice-candidate",
-          targetId: this.#sharerId,
+          targetId: publisherId,
+          publisherId,
           candidate: event.candidate.toJSON() as IceCandidateInit,
         });
       } catch {
@@ -229,9 +262,6 @@ export class ViewingManager {
   }
 
   #cleanup(): void {
-    this.#unsubscribeSignaling?.();
-    this.#unsubscribeSignaling = undefined;
-
     if (this.#connection) {
       this.#connection.ontrack = null;
       this.#connection.onicecandidate = null;
@@ -243,7 +273,6 @@ export class ViewingManager {
       }
     }
     this.#connection = undefined;
-    this.#sharerId = null;
     this.#pendingCandidates = [];
     this.#stats.reset();
     this.#quality = "reconnecting";
@@ -262,12 +291,15 @@ export class ViewingManager {
   }
 }
 
-function viewerErrorMessage(code: string, fallback: string): string {
+/** Turns a server refusal into something a person can act on. */
+export function watchErrorMessage(code: string, fallback: string): string {
   switch (code) {
-    case "ROOM_NOT_FOUND":
-      return "Esse código não corresponde a nenhuma transmissão ao vivo.";
-    case "ROOM_FULL":
-      return "Esta transmissão está lotada.";
+    case "NOT_PUBLISHING":
+      return "Essa pessoa parou de compartilhar.";
+    case "PUBLISHER_FULL":
+      return "Essa transmissão está lotada.";
+    case "ALREADY_WATCHING":
+      return "Você só pode assistir a uma transmissão por vez.";
     default:
       return fallback;
   }
