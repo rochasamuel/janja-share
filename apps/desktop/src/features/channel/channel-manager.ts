@@ -38,7 +38,6 @@ export interface ChannelManagerOptions {
  */
 export class ChannelManager {
   readonly #options: ChannelManagerOptions;
-  readonly #unsubscribe: Array<() => void> = [];
 
   #state: ChannelState = "idle";
   #channelId: string | null = null;
@@ -51,19 +50,30 @@ export class ChannelManager {
 
   constructor(options: ChannelManagerOptions) {
     this.#options = options;
+  }
 
-    this.#unsubscribe.push(
-      options.signaling.onMessage((message) => {
-        void this.#handleMessage(message);
-      }),
-    );
-    this.#unsubscribe.push(
-      options.signaling.onStateChange((state) => {
-        // A reconnect issues a new session id, so the only way back into the
-        // channel is to join it again. Everyone else sees us blink out and in.
-        if (state === "connected" && this.#channelId !== null) this.#rejoin();
-      }),
-    );
+  /**
+   * Starts listening, and hands back the teardown.
+   *
+   * Subscribing here rather than in the constructor is what makes the two
+   * symmetric. React's development double-mount tears an effect down and sets
+   * it back up, and a manager that subscribed once at construction came back
+   * from that permanently deaf — the server answered and nobody heard it.
+   */
+  subscribe(): () => void {
+    const offMessage = this.#options.signaling.onMessage((message) => {
+      void this.#handleMessage(message);
+    });
+    const offState = this.#options.signaling.onStateChange((state) => {
+      // A reconnect issues a new session id, so the only way back into the
+      // channel is to join it again. Everyone else sees us blink out and in.
+      if (state === "connected" && this.#channelId !== null) this.#rejoin();
+    });
+
+    return () => {
+      offMessage();
+      offState();
+    };
   }
 
   get sharing(): SharingManager {
@@ -146,11 +156,6 @@ export class ChannelManager {
 
   stopWatching(): void {
     this.#options.viewing.stop();
-  }
-
-  dispose(): void {
-    for (const off of this.#unsubscribe) off();
-    this.#unsubscribe.length = 0;
   }
 
   async #handleMessage(message: ServerMessage): Promise<void> {

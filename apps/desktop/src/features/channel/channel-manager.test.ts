@@ -7,8 +7,10 @@ import type { SignalingClient, SignalingState } from "../../services/signaling/s
 
 function setup() {
   const sent: ClientMessage[] = [];
-  let onMessage: ((message: ServerMessage) => void) | undefined;
-  let onState: ((state: SignalingState) => void) | undefined;
+  // Sets, not single slots, so a double subscribe is visible as a double
+  // delivery rather than silently overwriting the first listener.
+  const messageListeners = new Set<(message: ServerMessage) => void>();
+  const stateListeners = new Set<(state: SignalingState) => void>();
 
   let connected = true;
 
@@ -18,16 +20,12 @@ function setup() {
       sent.push(message);
     },
     onMessage: (callback: (message: ServerMessage) => void) => {
-      onMessage = callback;
-      return () => {
-        onMessage = undefined;
-      };
+      messageListeners.add(callback);
+      return () => messageListeners.delete(callback);
     },
     onStateChange: (callback: (state: SignalingState) => void) => {
-      onState = callback;
-      return () => {
-        onState = undefined;
-      };
+      stateListeners.add(callback);
+      return () => stateListeners.delete(callback);
     },
   } as unknown as SignalingClient;
 
@@ -56,8 +54,11 @@ function setup() {
     viewing: viewing as unknown as ViewingManager,
     readMachineName: async () => "PC-SAM",
   });
+  let unsubscribe = manager.subscribe();
 
-  const deliver = (message: ServerMessage) => onMessage?.(message);
+  const deliver = (message: ServerMessage) => {
+    for (const listener of [...messageListeners]) listener(message);
+  };
 
   /**
    * Routing is async, so a message handed to two sub-managers reaches the
@@ -88,7 +89,14 @@ function setup() {
       connected = false;
     },
     joined,
-    reconnect: () => onState?.("connected"),
+    reconnect: () => {
+      for (const listener of [...stateListeners]) listener("connected");
+    },
+    /** What React's development double-mount does to the effect. */
+    remount: () => {
+      unsubscribe();
+      unsubscribe = manager.subscribe();
+    },
   };
 }
 
@@ -371,5 +379,29 @@ describe("ChannelManager", () => {
     sent.length = 0;
     reconnect();
     expect(sent).toEqual([]);
+  });
+
+  it("still hears the server after a remount", async () => {
+    const { manager, remount, joined } = setup();
+
+    // React mounts, tears the effect down and mounts again in development. A
+    // manager that subscribed once at construction came back from this deaf:
+    // the channel was created on the server and the screen waited forever.
+    remount();
+
+    await manager.create();
+    joined();
+    expect(manager.snapshot.state).toBe("joined");
+    expect(manager.snapshot.channelId).toBe("AB12CD");
+  });
+
+  it("does not handle the same message twice after a remount", async () => {
+    const { manager, remount, joined, deliver } = setup();
+    remount();
+    await manager.create();
+    joined();
+
+    deliver({ type: "member-joined", member: { id: "ana", name: "PC-ANA", publishing: false } });
+    expect(manager.snapshot.members).toHaveLength(1);
   });
 });

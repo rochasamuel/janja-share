@@ -121,6 +121,11 @@ export function useChannel(signaling: SignalingClient | null): UseChannel {
     const manager = managerRef.current;
     if (!manager) return;
 
+    // Subscribing here, not at construction, so React's development
+    // double-mount cannot leave the manager unsubscribed: the manager itself
+    // is built once and kept in a ref, but this effect runs on every mount.
+    const unsubscribe = manager.subscribe();
+
     const timer = setInterval(() => {
       void manager.sharing.pollQuality();
       void manager.viewing.pollQuality();
@@ -128,7 +133,7 @@ export function useChannel(signaling: SignalingClient | null): UseChannel {
 
     return () => {
       clearInterval(timer);
-      manager.dispose();
+      unsubscribe();
     };
   }, [signaling]);
 
