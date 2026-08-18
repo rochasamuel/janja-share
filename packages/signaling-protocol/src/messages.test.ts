@@ -87,4 +87,26 @@ describe("parseClientMessage", () => {
     });
     expect(parseClientMessage(raw).ok).toBe(false);
   });
+
+  it("accepts view-size for both sizes", () => {
+    const publisherId = randomUUID();
+    expect(
+      parseClientMessage(JSON.stringify({ type: "view-size", publisherId, size: "panel" })).ok,
+    ).toBe(true);
+    expect(
+      parseClientMessage(JSON.stringify({ type: "view-size", publisherId, size: "fullscreen" })).ok,
+    ).toBe(true);
+  });
+
+  it("rejects a view-size with an unknown size or a bad publisher", () => {
+    const publisherId = randomUUID();
+    expect(
+      parseClientMessage(JSON.stringify({ type: "view-size", publisherId, size: "huge" })).ok,
+    ).toBe(false);
+    expect(
+      parseClientMessage(JSON.stringify({ type: "view-size", publisherId: "nope", size: "panel" }))
+        .ok,
+    ).toBe(false);
+    expect(parseClientMessage(JSON.stringify({ type: "view-size", size: "panel" })).ok).toBe(false);
+  });
 });

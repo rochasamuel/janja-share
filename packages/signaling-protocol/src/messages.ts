@@ -30,6 +30,17 @@ export type IceCandidateInit = z.infer<typeof iceCandidateInitSchema>;
  */
 const rawNameSchema = z.string().min(1).max(MAX_NAME_LENGTH * 2);
 
+/**
+ * How much of the picture a viewer can actually show.
+ *
+ * Two states rather than a pixel count, because there are only two: a fixed
+ * 320px popover and the monitor. A number would bring debounce and
+ * devicePixelRatio along with it for a window that cannot be resized.
+ */
+export const viewSizeSchema = z.enum(["panel", "fullscreen"]);
+
+export type ViewSize = z.infer<typeof viewSizeSchema>;
+
 export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("create-channel"), displayName: rawNameSchema }),
   z.object({
@@ -42,6 +53,13 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("publish-stop") }),
   z.object({ type: z.literal("watch"), publisherId: sessionIdSchema }),
   z.object({ type: z.literal("unwatch"), publisherId: sessionIdSchema }),
+  // Names only the publisher, for the same reason watch and unwatch do: this
+  // one travels in a single direction, so the publisher is the target.
+  z.object({
+    type: z.literal("view-size"),
+    publisherId: sessionIdSchema,
+    size: viewSizeSchema,
+  }),
   z.object({
     type: z.literal("offer"),
     targetId: sessionIdSchema,
@@ -118,6 +136,8 @@ export type ServerMessage =
   | { type: "watch-request"; fromId: string }
   /** They stopped. Tear that one connection down. */
   | { type: "unwatch"; fromId: string }
+  /** A viewer says how much picture it can show. Scale that one sender. */
+  | { type: "view-size"; fromId: string; size: ViewSize }
   | { type: "offer"; fromId: string; publisherId: string; sdp: string }
   | { type: "answer"; fromId: string; publisherId: string; sdp: string }
   | {
