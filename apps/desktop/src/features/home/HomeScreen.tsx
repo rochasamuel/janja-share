@@ -2,56 +2,71 @@ import { Row } from "../../components/Row.js";
 import { quitApp } from "../../services/panel.js";
 
 interface Props {
-  onShare: () => void;
-  onWatch: () => void;
+  onCreate: () => void;
+  onJoin: () => void;
+  onOpenChannel: () => void;
   onDiagnostics: () => void;
   onQuality: () => void;
-  sharing: boolean;
-  viewerCount: number;
-  roomId: string | null;
-  onStopSharing: () => void;
+  /** Null when not in a channel. */
+  channelId: string | null;
+  memberCount: number;
+  publishing: boolean;
+  watchingName: string | null;
 }
 
 export function HomeScreen({
-  onShare,
-  onWatch,
+  onCreate,
+  onJoin,
+  onOpenChannel,
   onDiagnostics,
   onQuality,
-  sharing,
-  viewerCount,
-  roomId,
-  onStopSharing,
+  channelId,
+  memberCount,
+  publishing,
+  watchingName,
 }: Props) {
   return (
     <>
       <div className="card">
-        {sharing ? (
+        {channelId ? (
           <>
             <div className="headline">
-              Compartilhando para {viewerCount} de 6
+              {memberCount === 1
+                ? "Você está sozinho no canal"
+                : `${memberCount} pessoas no canal`}
             </div>
-            <div className="code">{roomId}</div>
+            <div className="code">{channelId}</div>
           </>
         ) : (
           <>
-            <div className="headline">Nada sendo compartilhado</div>
-            <div className="sub">Abra uma sala, ou entre em uma com o código</div>
+            <div className="headline">Você não está em nenhum canal</div>
+            <div className="sub">Crie um canal, ou entre em um com o código</div>
           </>
         )}
       </div>
 
       <div className="rows">
-        <Row icon="share" label="Compartilhar minha tela" shortcut="Ctrl S" onClick={onShare} />
-        <Row icon="watch" label="Assistir a uma transmissão" shortcut="Ctrl W" onClick={onWatch} />
-        {sharing ? (
+        {channelId ? (
           <Row
-            icon="stop"
-            label="Parar de compartilhar"
-            shortcut="Ctrl ."
-            tone="danger"
-            onClick={onStopSharing}
+            icon="watch"
+            label={
+              publishing && watchingName
+                ? `Abrir o canal · ao vivo, vendo ${watchingName}`
+                : publishing
+                  ? "Abrir o canal · ao vivo"
+                  : watchingName
+                    ? `Abrir o canal · vendo ${watchingName}`
+                    : "Abrir o canal"
+            }
+            shortcut="Ctrl K"
+            onClick={onOpenChannel}
           />
-        ) : null}
+        ) : (
+          <>
+            <Row icon="share" label="Criar um canal" shortcut="Ctrl N" onClick={onCreate} />
+            <Row icon="watch" label="Entrar em um canal" shortcut="Ctrl J" onClick={onJoin} />
+          </>
+        )}
       </div>
 
       <div className="divider" />

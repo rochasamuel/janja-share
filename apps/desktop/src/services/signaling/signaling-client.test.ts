@@ -102,14 +102,14 @@ describe("SignalingClient", () => {
     client.connect();
     latest().open();
 
-    client.send({ type: "join-room", roomId: "7DS4B2" });
-    expect(JSON.parse(latest().sent[0]!)).toEqual({ type: "join-room", roomId: "7DS4B2" });
+    client.send({ type: "join-channel", channelId: "7DS4B2", displayName: "PC-SAM" });
+    expect(JSON.parse(latest().sent[0]!)).toEqual({ type: "join-channel", channelId: "7DS4B2", displayName: "PC-SAM" });
   });
 
   it("refuses to send before the socket is open", () => {
     const { client } = setup();
     client.connect();
-    expect(() => client.send({ type: "create-room" })).toThrow(/not connected/);
+    expect(() => client.send({ type: "create-channel", displayName: "PC-SAM" })).toThrow(/not connected/);
   });
 
   it("hands parsed messages to listeners", () => {
@@ -254,7 +254,7 @@ describe("SignalingClient", () => {
     client.connect();
     latest().open();
     unsubscribe();
-    latest().deliver({ type: "room-ended", reason: "sharer-left" });
+    latest().deliver({ type: "member-left", memberId: "ana", reason: "left" });
 
     expect(received).toEqual([]);
   });
