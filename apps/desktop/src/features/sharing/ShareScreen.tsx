@@ -1,20 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { Row } from "../../components/Row.js";
-import { setAutoHide, setPickerMode } from "../../services/panel.js";
 import type { SharingSnapshot } from "./sharing-manager.js";
 
 interface Props {
   snapshot: SharingSnapshot;
+  /** True while Chromium's picker is on screen. */
+  picking: boolean;
   onStart: () => Promise<void>;
   onStop: () => Promise<void>;
   onBack: () => void;
 }
 
-export function ShareScreen({ snapshot, onStart, onStop, onBack }: Props) {
+export function ShareScreen({ snapshot, picking, onStart, onStop, onBack }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
-  const [picking, setPicking] = useState(false);
-  /** Stops the picker reopening forever once the user cancels it. */
-  const attempted = useRef(false);
 
   const copy = useCallback((text: string, label: string) => {
     void navigator.clipboard.writeText(text).then(() => {
@@ -22,36 +20,6 @@ export function ShareScreen({ snapshot, onStart, onStop, onBack }: Props) {
       setTimeout(() => setCopied(null), 1500);
     });
   }, []);
-
-  const start = useCallback(async () => {
-    attempted.current = true;
-    setPicking(true);
-    // Resize before asking: the picker is painted inside the webview, so the
-    // room has to exist before it opens or it opens clipped.
-    await setPickerMode(true);
-    try {
-      await onStart();
-    } finally {
-      await setPickerMode(false);
-      setPicking(false);
-    }
-  }, [onStart]);
-
-  // Choosing "Share my screen" is already the decision. A screen that only
-  // says "click here to choose" makes the user decide twice, and the window
-  // resizing between those two clicks is what made it feel broken.
-  useEffect(() => {
-    if (attempted.current) return;
-    if (snapshot.state === "idle") void start();
-  }, [snapshot.state, start]);
-
-  useEffect(
-    () => () => {
-      void setPickerMode(false);
-      void setAutoHide(true);
-    },
-    [],
-  );
 
   if (picking || snapshot.state === "starting") {
     // Chromium paints its picker over this. What shows around it is our own
@@ -88,7 +56,7 @@ export function ShareScreen({ snapshot, onStart, onStop, onBack }: Props) {
         <div className="divider" />
 
         <div className="rows">
-          <Row icon="share" label="Try again" onClick={() => void start()} />
+          <Row icon="share" label="Try again" onClick={() => void onStart()} />
           <Row icon="back" label="Back" shortcut="Esc" onClick={onBack} />
         </div>
       </>

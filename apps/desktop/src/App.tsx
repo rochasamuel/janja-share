@@ -47,7 +47,10 @@ export function App() {
       if (!event.ctrlKey) return;
       const key = event.key.toLowerCase();
 
-      if (key === "s") setScreen("share");
+      if (key === "s") {
+        setScreen("share");
+        if (!live) void sharing.start();
+      }
       else if (key === "w") setScreen("watch");
       else if (key === "d") setScreen("diagnostics");
       else if (key === "q") void quitApp();
@@ -84,7 +87,13 @@ export function App() {
 
       {screen === "home" ? (
         <HomeScreen
-          onShare={() => setScreen("share")}
+          onShare={() => {
+            // The click is the decision. Starting here rather than in the
+            // screen's effect keeps capture off the component lifecycle, which
+            // React remounts in development.
+            setScreen("share");
+            if (!live) void sharing.start();
+          }}
           onWatch={() => setScreen("watch")}
           onDiagnostics={() => setScreen("diagnostics")}
           onStopSharing={() => void sharing.stop()}
@@ -99,6 +108,7 @@ export function App() {
       {screen === "share" ? (
         <ShareScreen
           snapshot={sharing.snapshot}
+          picking={sharing.picking}
           onStart={sharing.start}
           onStop={sharing.stop}
           onBack={home}

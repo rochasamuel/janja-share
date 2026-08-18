@@ -55,14 +55,25 @@ fn set_picker_mode(
     // The picker takes focus; hiding on blur now would kill it mid-choice.
     auto_hide.0.store(!enabled, Ordering::Relaxed);
 
+    let Ok(mut slot) = geometry.0.lock() else {
+        return;
+    };
+
     if enabled {
-        let saved = popover::enter_picker_mode(&window);
-        if let Ok(mut slot) = geometry.0.lock() {
-            *slot = saved;
+        // Idempotent on purpose. A second enter would save the already-grown
+        // geometry as if it were the panel's resting place, and restoring it
+        // later would leave an 880px window sitting where the popover was.
+        if slot.is_some() {
+            return;
         }
+        *slot = popover::enter_picker_mode(&window);
     } else {
-        let saved = geometry.0.lock().ok().and_then(|mut slot| slot.take());
-        popover::leave_picker_mode(&window, saved);
+        // Nothing to leave. Restoring here would shrink the window while the
+        // picker is still open, which is what clipped it.
+        let Some(saved) = slot.take() else {
+            return;
+        };
+        popover::leave_picker_mode(&window, Some(saved));
     }
 }
 

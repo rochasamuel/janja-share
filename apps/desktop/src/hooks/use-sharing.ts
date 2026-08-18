@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { config } from "../config.js";
 import { SharingManager, type SharingSnapshot } from "../features/sharing/sharing-manager.js";
 import { createPeerConnection } from "../services/webrtc/peer-connection.js";
+import { setAutoHide, setPickerMode } from "../services/panel.js";
 import { setTrayStatus } from "../services/tray-status.js";
 import type { SignalingClient } from "../services/signaling/signaling-client.js";
 
@@ -25,11 +26,14 @@ const EMPTY: SharingSnapshot = {
  */
 export function useSharing(signaling: SignalingClient | null): {
   snapshot: SharingSnapshot;
+  /** True while Chromium's picker is on screen. */
+  picking: boolean;
   start: () => Promise<void>;
   stop: () => Promise<void>;
 } {
   const managerRef = useRef<SharingManager | null>(null);
   const [snapshot, setSnapshot] = useState<SharingSnapshot>(EMPTY);
+  const [picking, setPicking] = useState(false);
 
   if (managerRef.current === null && signaling) {
     managerRef.current = new SharingManager({
@@ -63,11 +67,28 @@ export function useSharing(signaling: SignalingClient | null): {
 
   return {
     snapshot,
+    picking,
+    /**
+     * Starts capture, growing the window around Chromium's picker.
+     *
+     * This lives in the hook rather than in a screen's effect because React
+     * remounts components in development, and an effect that toggled picker
+     * mode would grow and shrink the window in a race — which opened the
+     * picker clipped and left the panel displaced.
+     */
     start: async () => {
-      await managerRef.current?.start();
+      setPicking(true);
+      await setPickerMode(true);
+      try {
+        await managerRef.current?.start();
+      } finally {
+        await setPickerMode(false);
+        setPicking(false);
+      }
     },
     stop: async () => {
       await managerRef.current?.stop();
+      await setAutoHide(true);
     },
   };
 }
