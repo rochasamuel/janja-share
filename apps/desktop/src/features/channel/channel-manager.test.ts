@@ -10,8 +10,13 @@ function setup() {
   let onMessage: ((message: ServerMessage) => void) | undefined;
   let onState: ((state: SignalingState) => void) | undefined;
 
+  let connected = true;
+
   const signaling = {
-    send: (message: ClientMessage) => sent.push(message),
+    send: (message: ClientMessage) => {
+      if (!connected) throw new Error("signaling socket is not connected");
+      sent.push(message);
+    },
     onMessage: (callback: (message: ServerMessage) => void) => {
       onMessage = callback;
       return () => {
@@ -79,6 +84,9 @@ function setup() {
     viewing,
     deliver,
     flush,
+    offline: () => {
+      connected = false;
+    },
     joined,
     reconnect: () => onState?.("connected"),
   };
@@ -335,6 +343,32 @@ describe("ChannelManager", () => {
     manager.leave();
     sent.length = 0;
 
+    reconnect();
+    expect(sent).toEqual([]);
+  });
+
+  it("says so when the socket is down instead of sitting on joining", async () => {
+    const { manager, offline } = setup();
+    offline();
+
+    await manager.create();
+    expect(manager.snapshot).toMatchObject({
+      state: "error",
+      message: "Sem conexão com o servidor. Tente de novo.",
+    });
+  });
+
+  it("does the same for a join, and keeps no channel it never entered", async () => {
+    const { manager, offline, sent, reconnect } = setup();
+    offline();
+
+    await manager.join("AB12CD");
+    expect(manager.snapshot.state).toBe("error");
+    expect(manager.snapshot.channelId).toBeNull();
+
+    // A rejoin on reconnect must not resurrect a channel the person never got
+    // into in the first place.
+    sent.length = 0;
     reconnect();
     expect(sent).toEqual([]);
   });

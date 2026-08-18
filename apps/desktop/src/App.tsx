@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "./components/Icon.js";
 import { ChannelScreen } from "./features/channel/ChannelScreen.js";
+import { CreatingScreen } from "./features/channel/CreatingScreen.js";
 import { JoinScreen } from "./features/channel/JoinScreen.js";
 import { HomeScreen } from "./features/home/HomeScreen.js";
 import { DiagnosticsScreen } from "./features/diagnostics/DiagnosticsScreen.js";
@@ -13,7 +14,15 @@ import { hidePanel, quitApp, setAutoHide } from "./services/panel.js";
 import { setTrayStatus } from "./services/tray-status.js";
 import type { SignalingState } from "./services/signaling/signaling-client.js";
 
-type Screen = "home" | "join" | "channel" | "share" | "watch" | "quality" | "diagnostics";
+type Screen =
+  | "home"
+  | "creating"
+  | "join"
+  | "channel"
+  | "share"
+  | "watch"
+  | "quality"
+  | "diagnostics";
 
 /** The two failing states are handled separately, above the panel. */
 const STATE_LABEL: Record<SignalingState, string> = {
@@ -26,7 +35,7 @@ const STATE_LABEL: Record<SignalingState, string> = {
 
 export function App() {
   const [screen, setScreen] = useState<Screen>("home");
-  const { client, state: signalingState } = useSignaling();
+  const { client, state: signalingState, retry } = useSignaling();
   const channel = useChannel(client);
 
   const { create, startPublishing, stopPublishing } = channel;
@@ -41,9 +50,12 @@ export function App() {
   const offline = signalingState === "failed" || signalingState === "reconnecting";
 
   // The user asked for a channel; landing them on the member list is the answer
-  // to that, and there is nothing else worth showing while it is joining.
+  // to that. Only the two screens that asked navigate — a rejoin after a
+  // reconnect reaches "joined" too, and must not yank anyone off what they
+  // were looking at.
   useEffect(() => {
-    if (channel.channel.state === "joined" && screen === "join") setScreen("channel");
+    if (channel.channel.state !== "joined") return;
+    if (screen === "join" || screen === "creating") setScreen("channel");
   }, [channel.channel.state, screen]);
 
   // A click elsewhere must not close the panel and kill a picture the user is
@@ -115,7 +127,7 @@ export function App() {
       const key = event.key.toLowerCase();
 
       if (key === "n" && !inChannel) {
-        setScreen("join");
+        setScreen("creating");
         void create();
       } else if (key === "j" && !inChannel) setScreen("join");
       else if (key === "k" && inChannel) setScreen("channel");
@@ -152,18 +164,27 @@ export function App() {
 
       {offline ? (
         <div className="notice">
-          {signalingState === "failed"
-            ? "Não foi possível falar com o servidor. Confira se ele está no ar e abra de novo."
-            : "Reconectando…"}
+          {signalingState === "failed" ? (
+            <>
+              Não foi possível falar com o servidor. Confira se ele está no ar.
+              {/* Without this the only way back is restarting the app: the
+                  backoff has spent its attempts and will not try again. */}
+              <button className="inline-retry" type="button" onClick={retry}>
+                Tentar de novo
+              </button>
+            </>
+          ) : (
+            "Reconectando…"
+          )}
         </div>
       ) : null}
 
       {screen === "home" ? (
         <HomeScreen
           onCreate={() => {
-            // The click is the decision. Joining lands on the channel screen
-            // through the effect above, once the server has answered.
-            setScreen("join");
+            // The click is the decision. The wait gets its own screen, and the
+            // effect above moves on to the member list once the server answers.
+            setScreen("creating");
             void channel.create();
           }}
           onJoin={() => setScreen("join")}
@@ -174,6 +195,15 @@ export function App() {
           memberCount={channel.channel.members.length + 1}
           publishing={live}
           watchingName={watching ? channel.viewing.publisherName : null}
+        />
+      ) : null}
+
+      {screen === "creating" ? (
+        <CreatingScreen
+          state={channel.channel.state}
+          message={channel.channel.message}
+          onRetry={() => void channel.create()}
+          onBack={home}
         />
       ) : null}
 

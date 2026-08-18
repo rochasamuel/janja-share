@@ -462,3 +462,20 @@ body {
   font-size: 12px;
   opacity: 0.55;
 }
+
+.inline-retry {
+  display: block;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.inline-retry:hover {
+  opacity: 0.75;
+}

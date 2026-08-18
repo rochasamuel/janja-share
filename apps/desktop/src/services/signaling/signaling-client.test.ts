@@ -258,4 +258,24 @@ describe("SignalingClient", () => {
 
     expect(received).toEqual([]);
   });
+
+  it("starts the backoff over when someone retries after it gave up", () => {
+    const { client, latest, clock } = setup({ maxAttempts: 2 });
+
+    client.connect();
+    latest().drop();
+    clock.runAll();
+    latest().drop();
+    clock.runAll();
+    latest().drop();
+    expect(client.state).toBe("failed");
+
+    // The retry has to get a full budget of attempts, not the single leftover
+    // the exhausted counter would allow.
+    client.connect();
+    expect(client.state).toBe("connecting");
+
+    latest().drop();
+    expect(client.state).toBe("reconnecting");
+  });
 });

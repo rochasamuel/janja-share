@@ -89,7 +89,7 @@ export class ChannelManager {
     const displayName = await this.#name();
     this.#requestedName = displayName;
     this.#setState("joining", null);
-    this.#send({ type: "create-channel", displayName });
+    if (!this.#send({ type: "create-channel", displayName })) this.#failOffline();
   }
 
   async join(channelId: string): Promise<void> {
@@ -97,7 +97,12 @@ export class ChannelManager {
     this.#requestedName = displayName;
     this.#channelId = channelId;
     this.#setState("joining", null);
-    this.#send({ type: "join-channel", channelId, displayName });
+    if (!this.#send({ type: "join-channel", channelId, displayName })) {
+      // The channel id is cleared so a later reconnect does not silently
+      // rejoin something the person never actually got into.
+      this.#channelId = null;
+      this.#failOffline();
+    }
   }
 
   leave(): void {
@@ -253,13 +258,24 @@ export class ChannelManager {
     return await read();
   }
 
-  #send(message: ClientMessage): void {
+  /**
+   * Nothing is ever queued: a stale membership message replayed after a
+   * reconnect describes a session id the server has already forgotten.
+   *
+   * Returns whether it went out, because entering a channel has to say so when
+   * it did not — otherwise the screen sits on "Entrando…" forever.
+   */
+  #send(message: ClientMessage): boolean {
     try {
       this.#options.signaling.send(message);
+      return true;
     } catch {
-      // The socket is down and reconnecting. Membership is re-established by
-      // the rejoin above, so there is nothing useful to queue here.
+      return false;
     }
+  }
+
+  #failOffline(): void {
+    this.#setState("error", "Sem conexão com o servidor. Tente de novo.");
   }
 
   #setState(state: ChannelState, message: string | null): void {
