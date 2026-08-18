@@ -52,7 +52,7 @@ time rather than loudly at boot.
 ## Tests
 
 ```bash
-pnpm test          # 320 tests
+pnpm test          # 327 tests
 pnpm typecheck
 bash scripts/check-rust.sh   # drives the Windows cargo over interop
 ```

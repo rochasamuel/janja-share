@@ -1,7 +1,12 @@
 import { useCallback, useState } from "react";
 import { Row } from "../../components/Row.js";
 import type { ConnectionQuality } from "../../services/webrtc/connection-quality.js";
-import { formatEncoder, formatNetwork, formatScreen } from "../../services/webrtc/stream-stats.js";
+import {
+  formatEncoder,
+  formatLimit,
+  formatNetwork,
+  formatScreen,
+} from "../../services/webrtc/stream-stats.js";
 import type { SharingSnapshot } from "./sharing-manager.js";
 
 /**
@@ -80,6 +85,9 @@ export function ShareScreen({ snapshot, channelId, picking, onStart, onStop, onB
   const screenLine = formatScreen(snapshot.stats);
   const networkLine = formatNetwork(snapshot.stats);
   const encoderLine = formatEncoder(snapshot.stats);
+  // Only ever present when something is actually wrong, which is what makes it
+  // worth a line of its own.
+  const limitLine = formatLimit(snapshot.stats);
 
   return (
     <>
@@ -120,6 +128,15 @@ export function ShareScreen({ snapshot, channelId, picking, onStart, onStop, onB
               : "sem som"}
         </span>
       </div>
+
+      {limitLine ? (
+        <div className="readout">
+          <span className="key">Limite</span>
+          <span className="value" data-tone="fault">
+            {limitLine}
+          </span>
+        </div>
+      ) : null}
 
       {screenLine ? (
         <div className="readout">

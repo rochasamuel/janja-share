@@ -29,6 +29,16 @@ export interface QualitySample {
   powerEfficient: boolean | null;
   /** What Chromium calls the implementation, e.g. "ExternalEncoder", "libvpx". */
   implementation: string | null;
+  /**
+   * Why the encoder is sending less than it was asked for: "cpu", "bandwidth"
+   * or "other". Null when nothing is holding it back.
+   *
+   * This is the field that tells a low frame rate apart from its causes. A
+   * saturated uplink and an exhausted encoder look identical from the outside
+   * — both show as fps falling and both appear to be cured by restarting —
+   * and they call for opposite responses.
+   */
+  qualityLimitation: string | null;
   iceState: RTCIceConnectionState;
 }
 
