@@ -4,7 +4,7 @@ import { ChannelManager, type ChannelSnapshot } from "../features/channel/channe
 import { SharingManager, type SharingSnapshot } from "../features/sharing/sharing-manager.js";
 import { ViewingManager, type ViewingSnapshot } from "../features/viewing/viewing-manager.js";
 import { createPeerConnection } from "../services/webrtc/peer-connection.js";
-import { setAutoHide, setPickerMode } from "../services/panel.js";
+import { setPickerMode } from "../services/panel.js";
 import {
   QUALITY_PRESETS,
   loadPreset,
@@ -173,8 +173,9 @@ export function useChannel(signaling: SignalingClient | null): UseChannel {
   }, []);
 
   const leave = useCallback(() => {
+    // Auto-hide is not set here: leaving drops both watching and sharing, and
+    // the one effect that owns it in App reacts to exactly that.
     managerRef.current?.leave();
-    void setAutoHide(true);
   }, []);
 
   /**

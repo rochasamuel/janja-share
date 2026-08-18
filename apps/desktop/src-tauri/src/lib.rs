@@ -53,8 +53,18 @@ fn set_picker_mode(
     auto_hide: State<'_, AutoHide>,
     enabled: bool,
 ) {
-    // The picker takes focus; hiding on blur now would kill it mid-choice.
-    auto_hide.0.store(!enabled, Ordering::Relaxed);
+    // Disabling only, never restoring.
+    //
+    // The picker takes focus, and hiding on blur mid-choice would kill it — so
+    // entering forces auto-hide off. Leaving used to force it back on, which
+    // is what made the panel vanish on the first alt-tab of a live share: the
+    // frontend had already set it correctly for "sharing" by the time the
+    // picker closed, and this overwrote that. Whether the panel may hide is a
+    // question about what the app is doing, and the frontend is the only place
+    // that knows.
+    if enabled {
+        auto_hide.0.store(false, Ordering::Relaxed);
+    }
 
     let Ok(mut slot) = geometry.0.lock() else {
         return;

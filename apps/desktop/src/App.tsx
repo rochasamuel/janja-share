@@ -65,12 +65,21 @@ export function App() {
     if (screen === "join" || screen === "creating") setScreen("channel");
   }, [channel.channel.state, screen]);
 
-  // A click elsewhere must not close the panel and kill a picture the user is
-  // looking at, or a share they are running. The watch screen used to own this
-  // alone, which cannot work once both can be true at the same time.
+  /**
+   * The single owner of whether a click elsewhere may close the panel.
+   *
+   * It must not close over a picture the user is watching, a share they are
+   * running, or a picker they are choosing from. Nothing else may set this:
+   * it used to be written from here, from leave(), from the diagnostics screen
+   * and from the Rust picker command, and they overwrote each other — a live
+   * share whose picker had just closed ended up hiding on the first alt-tab.
+   *
+   * `screen` is in the dependencies so every navigation re-asserts the
+   * invariant, which is what covers a screen that opened a picker of its own.
+   */
   useEffect(() => {
-    void setAutoHide(!(watching || live));
-  }, [watching, live]);
+    void setAutoHide(!(watching || live || channel.picking));
+  }, [watching, live, channel.picking, screen]);
 
   useEffect(() => {
     if (signalingState === "failed") {

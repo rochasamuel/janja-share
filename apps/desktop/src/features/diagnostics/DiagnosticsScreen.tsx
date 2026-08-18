@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Row } from "../../components/Row.js";
-import { setAutoHide, setPickerMode } from "../../services/panel.js";
+import { setPickerMode } from "../../services/panel.js";
 import { probeCapture, summarize, type ProbeResult } from "./capture-probe.js";
 import { listSources, summarizeNamedSource, tryNamedSource } from "./named-source.js";
 
@@ -23,8 +23,6 @@ export function DiagnosticsScreen({ onBack }: Props) {
   );
   const [busy, setBusy] = useState(false);
   const [lastResult, setLastResult] = useState<ProbeResult | null>(null);
-
-  useEffect(() => () => void setAutoHide(true), []);
 
   const run = useCallback(async (source: Source) => {
     setBusy(true);
