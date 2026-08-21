@@ -1,0 +1,544 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Codec probe</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background:#12131a; color:#e6e6ee; font:14px/1.55 ui-sans-serif,system-ui,sans-serif;
+         margin:0; padding:24px 28px; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  h2 { font-size:15px; margin:26px 0 8px; color:#9fb4ff; }
+  .sub { color:#8b8da0; margin:0 0 18px; }
+  button { background:#2b3350; color:#e6e6ee; border:1px solid #46507a; border-radius:7px;
+           padding:8px 14px; font:inherit; cursor:pointer; margin:0 8px 8px 0; }
+  button:hover:not(:disabled) { background:#38426a; }
+  button:disabled { opacity:.45; cursor:default; }
+  table { border-collapse:collapse; margin:6px 0 4px; font-size:13px; width:100%; }
+  th,td { border:1px solid #303650; padding:4px 9px; text-align:left; vertical-align:top; }
+  th { background:#1c2033; font-weight:600; }
+  code,pre,.mono { font-family:ui-monospace,"Cascadia Code",Consolas,monospace; }
+  pre { background:#0c0d14; border:1px solid #262b40; border-radius:7px; padding:11px 13px;
+        overflow-x:auto; font-size:12.5px; }
+  .good { color:#66dd99; font-weight:600; }
+  .bad  { color:#ff8a80; font-weight:600; }
+  .warn { color:#ffc46b; font-weight:600; }
+  .dim  { color:#8b8da0; }
+  #log { white-space:pre-wrap; }
+  canvas { display:none; }
+</style>
+
+<h1>Janja Share — H.264 profile probe</h1>
+<p class="sub">Answers: does this Chromium offer H.264 <b>High</b> profile, does the repo's current
+ranking actually negotiate it, and what does it buy at a fixed bitrate?</p>
+
+<p>
+  <button id="btn-caps">1 · Codec inventory</button>
+  <button id="btn-ab">2 · A/B negotiation + quality (synthetic, ~50s)</button>
+  <button id="btn-screen">3 · Real screen capture check (~25s)</button>
+  <button id="btn-copy" disabled>Copy results as Markdown</button>
+</p>
+
+<div id="out"></div>
+<h2>Log</h2>
+<pre id="log"></pre>
+<canvas id="src" width="1920" height="1080"></canvas>
+
+<script>
+const out = document.getElementById("out");
+const logEl = document.getElementById("log");
+const md = [];   // markdown accumulator, for RESULTS.md
+
+const log = (...a) => { logEl.textContent += a.join(" ") + "\n"; logEl.scrollTop = 1e9; };
+const html = (s) => { const d = document.createElement("div"); d.innerHTML = s; out.appendChild(d); };
+const esc = (s) => String(s).replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+/* ------------------------------------------------------------------ *
+ * profile-level-id decoding
+ * "640028" -> profile_idc 0x64 (High), profile_iop 0x00, level_idc 0x28 (4.0)
+ * ------------------------------------------------------------------ */
+const PROFILE_NAMES = { 0x42:"Baseline", 0x4D:"Main", 0x58:"Extended", 0x64:"High",
+                        0x6E:"High 10", 0x7A:"High 4:2:2", 0xF4:"High 4:4:4" };
+
+function describeH264(fmtp) {
+  const m = /profile-level-id=([0-9a-fA-F]{6})/.exec(fmtp || "");
+  if (!m) return { ok:false, profile:"(no profile-level-id)", level:"?", idc:0, lvl:0, pkt:0 };
+  const hex = m[1].toUpperCase();
+  const idc = parseInt(hex.slice(0,2), 16);
+  const iop = parseInt(hex.slice(2,4), 16);
+  const lvl = parseInt(hex.slice(4,6), 16);
+  let profile = PROFILE_NAMES[idc] ?? ("0x" + idc.toString(16));
+  // constraint_set1_flag alongside Baseline is what makes it *Constrained* Baseline.
+  if (idc === 0x42 && (iop & 0x40)) profile = "Constrained Baseline";
+  if (idc === 0x64 && (iop & 0x0C)) profile = "Constrained High";
+  const pkt = /packetization-mode=1/.test(fmtp || "") ? 1 : 0;
+  return { ok:true, hex, idc, iop, lvl, pkt, profile, level:(lvl/10).toFixed(1) };
+}
+
+const isH264 = (c) => /h264/i.test(c.mimeType);
+const isVP9  = (c) => /vp9/i.test(c.mimeType);
+
+/* The ranking the repo ships today (services/webrtc/peer-connection.ts).
+   Note it never inspects sdpFmtpLine, so it keeps Chromium's own order. */
+const rankToday = (codecs) => [
+  ...codecs.filter(isH264),
+  ...codecs.filter(isVP9),
+  ...codecs.filter(c => !isH264(c) && !isVP9(c)),
+];
+
+/* Profile-aware ranking: High > Main > Baseline, non-interleaved packetization
+   preferred, higher level preferred. */
+function h264Score(c) {
+  const d = describeH264(c.sdpFmtpLine);
+  let s = 0;
+  if (d.idc === 0x64) s += 100;
+  else if (d.idc === 0x4D) s += 50;
+  if (d.pkt === 1) s += 10;
+  return s + d.lvl / 1000;
+}
+const rankHighFirst = (codecs) => [
+  ...codecs.filter(isH264).sort((a,b) => h264Score(b) - h264Score(a)),
+  ...codecs.filter(isVP9),
+  ...codecs.filter(c => !isH264(c) && !isVP9(c)),
+];
+
+/* ------------------------------------------------------------------ *
+ * 1 - inventory
+ * ------------------------------------------------------------------ */
+function inventory() {
+  md.push("## 1 · Codec inventory\n");
+  md.push("- UA: `" + navigator.userAgent + "`");
+  const ua = navigator.userAgent;
+  html(`<h2>1 · Codec inventory</h2><p class="dim mono">${esc(ua)}</p>`);
+
+  for (const side of ["sender", "receiver"]) {
+    const api = side === "sender" ? RTCRtpSender : RTCRtpReceiver;
+    const caps = api.getCapabilities?.("video");
+    if (!caps) { html(`<p class="bad">${side}: getCapabilities unavailable</p>`); continue; }
+
+    const h264 = caps.codecs.filter(isH264);
+    const rows = h264.map(c => {
+      const d = describeH264(c.sdpFmtpLine);
+      const hi = d.idc === 0x64;
+      return `<tr>
+        <td class="mono">${esc(c.mimeType)}</td>
+        <td class="mono">${esc(d.hex ?? "—")}</td>
+        <td class="${hi ? "good" : ""}">${esc(d.profile)}</td>
+        <td>${esc(d.level)}</td>
+        <td>${d.pkt}</td>
+        <td class="mono dim">${esc(c.sdpFmtpLine ?? "")}</td></tr>`;
+    }).join("");
+
+    const highs = h264.filter(c => describeH264(c.sdpFmtpLine).idc === 0x64);
+    const verdict = highs.length
+      ? `<p class="good">High profile IS offered (${highs.length} entr${highs.length>1?"ies":"y"}).</p>`
+      : `<p class="bad">No High profile on the ${side} side — only ` +
+        [...new Set(h264.map(c => describeH264(c.sdpFmtpLine).profile))].join(", ") + `.</p>`;
+
+    html(`<h2 style="font-size:14px">${side} · H.264 entries (${h264.length})</h2>
+      <table><tr><th>mimeType</th><th>p-l-id</th><th>profile</th><th>level</th><th>pkt</th><th>fmtp</th></tr>
+      ${rows || '<tr><td colspan="6" class="bad">none</td></tr>'}</table>${verdict}`);
+
+    md.push(`\n### ${side} H.264 entries\n`);
+    md.push("| p-l-id | profile | level | pkt-mode |");
+    md.push("|---|---|---|---|");
+    for (const c of h264) {
+      const d = describeH264(c.sdpFmtpLine);
+      md.push(`| \`${d.hex ?? "—"}\` | ${d.profile} | ${d.level} | ${d.pkt} |`);
+    }
+    md.push(`\n**High profile offered (${side}): ${highs.length ? "YES" : "NO"}**`);
+  }
+
+  // What the two rankings would put first.
+  const codecs = RTCRtpSender.getCapabilities("video").codecs;
+  const first = (r) => { const c = r(codecs)[0]; const d = describeH264(c.sdpFmtpLine);
+                         return `${c.mimeType} ${d.hex ?? ""} (${d.profile})`; };
+  html(`<h2 style="font-size:14px">First choice per ranking</h2>
+    <table>
+      <tr><th>ranking</th><th>codec it puts first</th></tr>
+      <tr><td>repo today</td><td class="mono">${esc(first(rankToday))}</td></tr>
+      <tr><td>profile-aware</td><td class="mono">${esc(first(rankHighFirst))}</td></tr>
+    </table>`);
+  md.push(`\n### First choice per ranking\n`);
+  md.push("| ranking | codec it puts first |");
+  md.push("|---|---|");
+  md.push(`| repo today | \`${first(rankToday)}\` |`);
+  md.push(`| profile-aware | \`${first(rankHighFirst)}\` |`);
+  log("inventory done");
+  document.getElementById("btn-copy").disabled = false;
+}
+
+/* ------------------------------------------------------------------ *
+ * synthetic source - deterministic, so both A/B runs see identical frames
+ * ------------------------------------------------------------------ */
+function syntheticStream() {
+  const cv = document.getElementById("src");
+  const ctx = cv.getContext("2d", { alpha:false });
+  let n = 0;
+  // Screen-like: white page, dense dark text, plus a moving element so the
+  // encoder is not simply repeating a static frame forever.
+  const draw = () => {
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0,0,1920,1080);
+    ctx.fillStyle = "#1a1a1a"; ctx.font = "15px monospace";
+    for (let y = 0; y < 62; y++) {
+      const w = 300 + ((y * 37 + n) % 900);
+      ctx.fillText("const viewer = manager.addViewer(id); // ".repeat(6).slice(0, w / 7), 40, 28 + y*17);
+    }
+    ctx.fillStyle = "#c8dcff"; ctx.fillRect(1200, 120, 600, 340);
+    ctx.fillStyle = "#2b56d0";
+    const x = 1220 + ((n * 9) % 520), yy = 140 + ((n * 5) % 280);
+    ctx.fillRect(x, yy, 70, 70);
+    ctx.fillStyle = "#000"; ctx.font = "bold 34px monospace";
+    ctx.fillText("frame " + n, 1220, 540);
+    n++;
+    if (n < 100000) requestAnimationFrame(draw);
+  };
+  draw();
+  return cv.captureStream(60);
+}
+
+/* ------------------------------------------------------------------ *
+ * loopback measurement
+ * ------------------------------------------------------------------ */
+async function measure({ label, rank, stream, maxBitrate, seconds, contentHint,
+                         degradationPreference = "maintain-resolution" }) {
+  const pc1 = new RTCPeerConnection();
+  const pc2 = new RTCPeerConnection();
+  pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate).catch(()=>{});
+  pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate).catch(()=>{});
+
+  const track = stream.getVideoTracks()[0];
+  if (contentHint) track.contentHint = contentHint;
+  pc1.addTrack(track, stream);
+
+  // Same call site as the app: after addTrack, before createOffer.
+  const ranked = rank(RTCRtpSender.getCapabilities("video").codecs);
+  for (const t of pc1.getTransceivers()) {
+    if (t.sender.track?.kind === "video") { try { t.setCodecPreferences(ranked); } catch(e){ log("setCodecPreferences:", e.message); } }
+  }
+
+  const offer = await pc1.createOffer();
+  await pc1.setLocalDescription(offer);
+  await pc2.setRemoteDescription(offer);
+  const answer = await pc2.createAnswer();
+  await pc2.setLocalDescription(answer);
+  await pc1.setRemoteDescription(answer);
+
+  const sender = pc1.getSenders().find(s => s.track?.kind === "video");
+  const p = sender.getParameters();
+  p.encodings = p.encodings?.length ? p.encodings : [{}];
+  for (const e of p.encodings) { e.maxBitrate = maxBitrate; e.scaleResolutionDownBy = 1; delete e.maxFramerate; }
+  p.degradationPreference = degradationPreference;
+  await sender.setParameters(p);
+
+  const read = async () => {
+    const rep = await pc1.getStats();
+    let o = null, codec = null;
+    rep.forEach(s => { if (s.type === "outbound-rtp" && s.kind === "video") o = s; });
+    if (o?.codecId) codec = rep.get(o.codecId);
+    if (o && !window.__dumped) { window.__dumped = 1;
+      log("outbound-rtp keys: " + Object.keys(o).join(",")); }
+    return { o, codec, t: performance.now() };
+  };
+
+  while (document.visibilityState === "hidden") {
+    log(`[${label}] window is in the background - waiting for focus…`);
+    await new Promise(r => {
+      const h = () => { if (document.visibilityState === "visible") {
+        document.removeEventListener("visibilitychange", h); r(); } };
+      document.addEventListener("visibilitychange", h);
+    });
+  }
+  log(`[${label}] warming up…`);
+  let hidden = document.visibilityState === "hidden";
+  const watch = () => { if (document.visibilityState === "hidden") hidden = true; };
+  document.addEventListener("visibilitychange", watch);
+  await sleep(6000);                       // let rate control settle and ramp
+  const a = await read();
+  await sleep(seconds * 1000);
+  const b = await read();
+  document.removeEventListener("visibilitychange", watch);
+  if (hidden) log(`[${label}] WARNING: tab was backgrounded - frame source was throttled, run is invalid`);
+
+  pc1.close(); pc2.close();
+
+  if (!a.o || !b.o) { log(`[${label}] no outbound-rtp stats`); return null; }
+  const dt      = (b.t - a.t) / 1000;
+  const dBytes  = b.o.bytesSent - a.o.bytesSent;
+  const dFrames = b.o.framesEncoded - a.o.framesEncoded;
+  const dQp     = (b.o.qpSum ?? 0) - (a.o.qpSum ?? 0);
+  const dEnc    = (b.o.totalEncodeTime ?? 0) - (a.o.totalEncodeTime ?? 0);
+  const d       = describeH264(b.codec?.sdpFmtpLine);
+
+  const r = {
+    label,
+    codec: b.codec?.mimeType ?? "?",
+    fmtp: b.codec?.sdpFmtpLine ?? "",
+    profile: d.ok ? `${d.profile} ${d.level}` : "n/a",
+    plid: d.hex ?? "—",
+    impl: b.o.encoderImplementation ?? "?",
+    kbps: Math.round(dBytes * 8 / dt / 1000),
+    fps: +(dFrames / dt).toFixed(1),
+    res: `${b.o.frameWidth}x${b.o.frameHeight}`,
+    qp: dFrames ? +(dQp / dFrames).toFixed(1) : null,
+    msPerFrame: dFrames ? +(dEnc * 1000 / dFrames).toFixed(2) : null,
+    limit: b.o.qualityLimitationReason ?? "?",
+    hidden,
+  };
+  log(`[${label}] ${r.codec} ${r.plid} (${r.profile}) impl=${r.impl} ` +
+      `${r.kbps}kbps ${r.fps}fps ${r.res} QP=${r.qp} ${r.msPerFrame}ms/frame limit=${r.limit}`);
+  return r;
+}
+
+function renderRuns(title, runs, note) {
+  const rows = runs.filter(Boolean).map(r => `<tr>
+    <td>${esc(r.label)}</td>
+    <td class="mono">${esc(r.plid)}</td>
+    <td class="${/High/.test(r.profile) ? "good" : "warn"}">${esc(r.profile)}</td>
+    <td class="mono" style="font-size:12px">${esc(r.impl)}</td>
+    <td>${r.kbps}</td><td>${r.fps}</td><td>${esc(r.res)}</td>
+    <td class="${r.qp !== null && r.qp < 28 ? "good" : ""}">${r.qp ?? "—"}</td>
+    <td>${r.msPerFrame ?? "—"}</td><td>${esc(r.limit)}</td>
+    <td class="${r.hidden ? "bad" : "dim"}">${r.hidden ? "BACKGROUNDED" : "ok"}</td></tr>`).join("");
+  html(`<h2>${esc(title)}</h2>
+    <table><tr><th>run</th><th>p-l-id</th><th>profile</th><th>encoder</th><th>kbps</th>
+    <th>fps</th><th>res</th><th>avg QP</th><th>ms/frame</th><th>limited by</th><th>valid</th></tr>${rows}</table>
+    ${note ? `<p>${note}</p>` : ""}`);
+
+  md.push(`\n## ${title}\n`);
+  md.push("| run | p-l-id | profile | encoder | kbps | fps | res | avg QP | ms/frame | limited by | valid |");
+  md.push("|---|---|---|---|---|---|---|---|---|---|---|");
+  for (const r of runs.filter(Boolean)) {
+    md.push(`| ${r.label} | \`${r.plid}\` | ${r.profile} | ${r.impl} | ${r.kbps} | ${r.fps} | ${r.res} | ${r.qp ?? "—"} | ${r.msPerFrame ?? "—"} | ${r.limit} | ${r.hidden ? "BACKGROUNDED" : "ok"} |`);
+  }
+  document.getElementById("btn-copy").disabled = false;
+}
+
+/* ------------------------------------------------------------------ *
+ * 2 - A/B on identical synthetic content at a fixed 2.5 Mbps cap
+ * ------------------------------------------------------------------ */
+async function abTest() {
+  const CAP = 2_500_000;   // what the reference app pins (q=2500000)
+  const stream = syntheticStream();
+  log("A/B at " + CAP/1e6 + " Mbps, 1920x1080, identical synthetic frames both runs");
+
+  const runs = [];
+  runs.push(await measure({ label:"repo ranking today", rank:rankToday,
+                            stream, maxBitrate:CAP, seconds:18, contentHint:"detail" }));
+  await sleep(1500);
+  runs.push(await measure({ label:"profile-aware ranking", rank:rankHighFirst,
+                            stream, maxBitrate:CAP, seconds:18, contentHint:"detail" }));
+
+  const [a, b] = runs;
+  let note = "";
+  if (a && b) {
+    if (a.plid === b.plid) {
+      note = `<span class="warn">Both rankings negotiated the same codec (${a.plid}) — ` +
+             `on this machine the profile-aware change would be a no-op.</span>`;
+    } else if (a.qp !== null && b.qp !== null) {
+      const drop = +(a.qp - b.qp).toFixed(1);
+      note = drop > 0
+        ? `<span class="good">Profile-aware ranking encodes at ${drop} lower average QP ` +
+          `(${a.qp} → ${b.qp}) for the same ${b.kbps} kbps. Lower QP = less quantisation = sharper picture.</span>`
+        : `<span class="warn">No QP improvement (${a.qp} → ${b.qp}).</span>`;
+    } else {
+      note = `<span class="warn">Codec changed (${a.plid} → ${b.plid}) but this encoder reports no qpSum, ` +
+             `so quality must be judged by eye.</span>`;
+    }
+  }
+  renderRuns("2 · A/B negotiation + quality @ 2.5 Mbps (synthetic)", runs, note);
+  md.push("\n" + note.replace(/<[^>]+>/g, ""));
+}
+
+
+/* A deliberately demanding source: full-frame scrolling detail plus fast
+   moving shapes, i.e. the game case. The first A/B used near-static screen
+   content and settled at QP 17, where the encoder is already transparent and
+   no codec difference can show. Profile differences only appear when the
+   bitrate cap actually binds. */
+function hardStream() {
+  const cv = document.getElementById("src");
+  const ctx = cv.getContext("2d", { alpha:false });
+  const tile = document.createElement("canvas");
+  tile.width = 1400; tile.height = 900;
+  const tctx = tile.getContext("2d");
+  const img = tctx.createImageData(1400, 900);
+  let seed = 12345;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+  for (let i = 0; i < img.data.length; i += 4) {
+    img.data[i] = 30 + rnd()*200; img.data[i+1] = 30 + rnd()*200;
+    img.data[i+2] = 30 + rnd()*200; img.data[i+3] = 255;
+  }
+  tctx.putImageData(img, 0, 0);
+  let n = 0;
+  const draw = () => {
+    // Scaled-up crop: smoothed detail rather than pathological pure noise.
+    const sx = (n * 3) % 300, sy = (n * 2) % 200;
+    ctx.drawImage(tile, sx, sy, 1100, 620, 0, 0, 1920, 1080);
+    for (let k = 0; k < 14; k++) {
+      const a = n * 0.035 + k * 0.9;
+      ctx.fillStyle = `hsl(${(k*26 + n*2) % 360} 92% 55%)`;
+      ctx.beginPath();
+      ctx.arc(960 + Math.cos(a) * (260 + k*45), 540 + Math.sin(a*1.31) * (180 + k*32),
+              34 + k*5, 0, 6.2832);
+      ctx.fill();
+    }
+    n++;
+    if (n < 100000) requestAnimationFrame(draw);
+  };
+  draw();
+  return cv.captureStream(60);
+}
+
+async function abHard() {
+  const CAP = 2_500_000;
+  const stream = hardStream();
+  log("HARD A/B at " + CAP/1e6 + " Mbps, 1920x1080, high-motion detailed content");
+  const runs = [];
+  runs.push(await measure({ label:"repo ranking today", rank:rankToday,
+                            stream, maxBitrate:CAP, seconds:18, contentHint:"motion",
+                            degradationPreference:"maintain-framerate" }));
+  await sleep(1500);
+  runs.push(await measure({ label:"profile-aware ranking", rank:rankHighFirst,
+                            stream, maxBitrate:CAP, seconds:18, contentHint:"motion",
+                            degradationPreference:"maintain-framerate" }));
+  const [a, b] = runs;
+  let note = "";
+  if (a && b && a.qp !== null && b.qp !== null) {
+    const drop = +(a.qp - b.qp).toFixed(1);
+    const pct = +((drop / a.qp) * 100).toFixed(1);
+    note = `${a.plid} QP ${a.qp} -> ${b.plid} QP ${b.qp} (${drop > 0 ? "-" : "+"}${Math.abs(drop)}, ${pct}%) at ${b.kbps} kbps`;
+  }
+  renderRuns("2b - A/B on HARD content @ 2.5 Mbps", runs, `<span class="good">${esc(note)}</span>`);
+  md.push("\n" + note);
+}
+
+
+/* Realistic game-like content: a smooth low-frequency background (upscaled
+   coarse noise, so it compresses the way real video does) under sharp-edged
+   moving sprites and a HUD. The previous "hard" source was near-white noise,
+   which is incompressible and made the encoder abandon resolution entirely -
+   it collapsed to 480x270 and told us nothing about 1080p. */
+function gameStream() {
+  const cv = document.getElementById("src");
+  const ctx = cv.getContext("2d", { alpha:false });
+  const tile = document.createElement("canvas");
+  tile.width = 240; tile.height = 135;
+  const tctx = tile.getContext("2d");
+  const img = tctx.createImageData(240, 135);
+  let seed = 987654321;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+  for (let i = 0; i < img.data.length; i += 4) {
+    const b = rnd();
+    img.data[i] = 20 + b*90; img.data[i+1] = 40 + b*120; img.data[i+2] = 70 + b*150;
+    img.data[i+3] = 255;
+  }
+  tctx.putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  let n = 0;
+  const draw = () => {
+    const sx = (n * 0.35) % 60, sy = (n * 0.22) % 35;
+    ctx.drawImage(tile, sx, sy, 170, 96, 0, 0, 1920, 1080);
+    for (let k = 0; k < 18; k++) {
+      const a = n * 0.03 + k * 0.7;
+      const x = 960 + Math.cos(a) * (250 + k*40), y = 540 + Math.sin(a*1.27) * (170 + k*28);
+      ctx.fillStyle = `hsl(${(k*21 + n) % 360} 88% 58%)`;
+      ctx.fillRect(x - 30, y - 30, 60, 60);
+      ctx.strokeStyle = "#0b0b12"; ctx.lineWidth = 3;
+      ctx.strokeRect(x - 30, y - 30, 60, 60);
+    }
+    ctx.fillStyle = "rgba(8,8,14,.82)"; ctx.fillRect(0, 980, 1920, 100);
+    ctx.fillStyle = "#eaeaf5"; ctx.font = "bold 30px monospace";
+    ctx.fillText(`HP 87/100   MANA 42/60   ${(n % 999).toString().padStart(3,"0")} fps-frame`, 40, 1042);
+    n++;
+    if (n < 100000) requestAnimationFrame(draw);
+  };
+  draw();
+  return cv.captureStream(60);
+}
+
+async function abGame() {
+  const CAP = 2_500_000;
+  const stream = gameStream();
+  log("GAME A/B at " + CAP/1e6 + " Mbps, 1080p pinned (maintain-resolution)");
+  const runs = [];
+  for (const [label, rank] of [["repo ranking today", rankToday],
+                               ["profile-aware ranking", rankHighFirst]]) {
+    runs.push(await measure({ label, rank, stream, maxBitrate:CAP, seconds:18,
+                              contentHint:"motion",
+                              // Pin resolution so codec efficiency shows up in QP
+                              // instead of being spent on shrinking the picture.
+                              degradationPreference:"maintain-resolution" }));
+    await sleep(1500);
+  }
+  const [a, b] = runs;
+  let note = "";
+  if (a && b && a.qp !== null && b.qp !== null) {
+    const drop = +(a.qp - b.qp).toFixed(1);
+    note = `${a.plid} QP ${a.qp} @ ${a.kbps}kbps ${a.res} ${a.fps}fps  ->  ` +
+           `${b.plid} QP ${b.qp} @ ${b.kbps}kbps ${b.res} ${b.fps}fps   (QP ${drop>0?"-":"+"}${Math.abs(drop)})`;
+    if (a.res !== b.res) note += "  [!] resolutions differ - not directly comparable";
+    if (a.hidden || b.hidden) note += "  [!] a run was backgrounded - INVALID";
+  }
+  renderRuns("2c - A/B on game-like content @ 2.5 Mbps, 1080p pinned", runs, `<span class="good">${esc(note)}</span>`);
+  md.push("\n" + note);
+}
+
+/* ------------------------------------------------------------------ *
+ * 3 - real getDisplayMedia, to confirm the shipping path
+ * ------------------------------------------------------------------ */
+async function screenTest() {
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:60} },
+      audio: false,
+    });
+  } catch (e) { log("capture failed/cancelled: " + e.name); return; }
+
+  const s = stream.getVideoTracks()[0].getSettings();
+  log(`capture: ${s.width}x${s.height} @ ${s.frameRate} fps`);
+  const runs = [];
+  runs.push(await measure({ label:"real screen · profile-aware", rank:rankHighFirst,
+                            stream, maxBitrate:2_500_000, seconds:15, contentHint:"detail" }));
+  for (const t of stream.getTracks()) t.stop();
+  renderRuns(`3 · Real screen capture @ 2.5 Mbps (source ${s.width}x${s.height}@${s.frameRate})`, runs, "");
+}
+
+document.getElementById("btn-caps").onclick   = (e) => { e.target.disabled = true; inventory(); };
+document.getElementById("btn-ab").onclick     = async (e) => { e.target.disabled = true; await abTest(); };
+document.getElementById("btn-screen").onclick = async (e) => { e.target.disabled = true; await screenTest(); };
+/* ------------------------------------------------------------------ *
+ * auto mode: ?auto=1 runs the non-interactive halves and posts the
+ * markdown back to the WSL-side runner, so results need no copy-paste.
+ * Neither inventory() nor abTest() needs a user gesture; only the real
+ * getDisplayMedia run does, so that one stays a button.
+ * ------------------------------------------------------------------ */
+async function auto() {
+  const post = (status, extra) => fetch("/results", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ status, ua: navigator.userAgent, markdown: md.join("\n"),
+                           log: logEl.textContent, ...extra }),
+  }).catch(() => {});
+  try {
+    document.getElementById("btn-caps").disabled = true;
+    inventory();
+    await post("inventory");
+    document.getElementById("btn-ab").disabled = true;
+    const mode = new URLSearchParams(location.search).get("auto");
+    if (mode === "2") await abHard();
+    else if (mode === "3") await abGame();
+    else await abTest();
+    await post("done");
+    log("auto run complete - results posted");
+  } catch (e) {
+    log("auto run failed: " + (e && e.stack || e));
+    await post("error", { error: String(e && e.stack || e) });
+  }
+}
+if (new URLSearchParams(location.search).has("auto")) addEventListener("load", auto);
+
+document.getElementById("btn-copy").onclick   = () => {
+  navigator.clipboard.writeText(md.join("\n")).then(() => log("results copied to clipboard"));
+};
+</script>

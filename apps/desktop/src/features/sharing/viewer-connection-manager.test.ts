@@ -230,7 +230,7 @@ describe("ViewerConnectionManager", () => {
     const parameters = pcFor(0).parametersOfVideoSender();
     // A new viewer is in the panel, so the default ceiling arrives scaled to
     // the picture it is actually being sent.
-    expect(parameters.encodings?.[0]?.maxBitrate).toBe(Math.round(8_000_000 / 9));
+    expect(parameters.encodings?.[0]?.maxBitrate).toBe(Math.round(5_000_000 / 9));
     expect(parameters.degradationPreference).toBe("maintain-resolution");
   });
 
@@ -366,8 +366,10 @@ describe("ViewerConnectionManager", () => {
       const second = pcFor(1).parametersOfVideoSender().encodings?.[0];
       expect(first?.scaleResolutionDownBy).toBe(3);
       expect(second?.scaleResolutionDownBy).toBe(1);
-      // The ceiling follows the scale: a ninth of 1 Mbps is under the floor.
-      expect(first?.maxBitrate).toBe(500_000);
+      // The ceiling follows the scale: a ninth of 1 Mbps is under the floor,
+      // so the floor applies — but capped at a third of the chosen ceiling,
+      // because a floor that outranks the ceiling is not a floor.
+      expect(first?.maxBitrate).toBe(333_333);
       expect(second?.maxBitrate).toBe(1_000_000);
     });
 
@@ -389,7 +391,7 @@ describe("ViewerConnectionManager", () => {
       // full-screen figure would let congestion control spend it all on a
       // near-lossless 640x360.
       expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(
-        Math.round(8_000_000 / 9),
+        Math.round(5_000_000 / 9),
       );
     });
 
@@ -399,7 +401,7 @@ describe("ViewerConnectionManager", () => {
 
       manager.setViewerSize("viewer-1", "fullscreen");
 
-      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(8_000_000);
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(5_000_000);
     });
 
     it("never drops the ceiling below what screen text needs", async () => {
@@ -407,13 +409,41 @@ describe("ViewerConnectionManager", () => {
         publisherId: PUBLISHER,
         createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
         send: () => {},
-        // A ninth of this is 111 kbps, which is not a ceiling but a straitjacket.
-        encoding: { maxBitrateBps: 1_000_000, degradationPreference: "maintain-resolution" },
+        // A ninth of this is 278 kbps, which is not a ceiling but a straitjacket.
+        encoding: { maxBitrateBps: 2_500_000, degradationPreference: "maintain-resolution" },
       });
       manager.setStream(fakeStream());
       await manager.addViewer("viewer-1");
 
       expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(500_000);
+    });
+
+    it("lets a lower preset actually lower what a panel viewer costs", async () => {
+      // The reason the floor is capped rather than flat. Every ceiling at or
+      // below 4.5 Mbps scales to under 500 kbps, so with a flat floor the two
+      // cheapest presets were indistinguishable for a panel viewer — and a
+      // panel is where every viewer starts. Someone who drops to "Conexão
+      // fraca" because their link is failing has to get something for it.
+      const rateFor = async (maxBitrateBps: number) => {
+        const manager = new ViewerConnectionManager({
+          publisherId: PUBLISHER,
+          createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+          send: () => {},
+          encoding: { maxBitrateBps, degradationPreference: "maintain-resolution" },
+        });
+        manager.setStream(fakeStream());
+        await manager.addViewer("viewer-1");
+        return manager;
+      };
+
+      await rateFor(2_500_000);
+      const thrifty = pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxBitrate;
+      await rateFor(1_200_000);
+      const weak = pcFor(1).parametersOfVideoSender().encodings?.[0]?.maxBitrate;
+
+      expect(thrifty).toBe(500_000);
+      expect(weak).toBe(400_000);
+      expect(weak!).toBeLessThan(thrifty!);
     });
 
     it("re-aims the ceiling too when the preset changes", async () => {

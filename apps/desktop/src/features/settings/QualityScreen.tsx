@@ -10,7 +10,7 @@ interface Props {
 }
 
 /** Fixed order, cheapest last: the list reads as a scale rather than a set. */
-const ORDER: QualityPreset[] = ["auto", "smooth", "video", "game", "thrifty"];
+export const ORDER: QualityPreset[] = ["auto", "smooth", "video", "game", "thrifty", "weak"];
 
 export function QualityScreen({ preset, sharing, onSelect, onBack }: Props) {
   return (

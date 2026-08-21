@@ -7,7 +7,7 @@
  * a combination no one wants and every separate control invites.
  */
 
-export type QualityPreset = "auto" | "smooth" | "video" | "game" | "thrifty";
+export type QualityPreset = "auto" | "smooth" | "video" | "game" | "thrifty" | "weak";
 
 export interface QualityProfile {
   /** Hints, not demands. Real capture adapts to the monitor and the GPU. */
@@ -41,25 +41,30 @@ export interface QualityPresetInfo {
 export const QUALITY_PRESETS: Record<QualityPreset, QualityPresetInfo> = {
   auto: {
     label: "Automático",
-    detail: "A conexão decide",
-    // Exactly what the app asked for before this screen existed.
+    detail: "A conexão decide · até 5 Mbps",
+    // Measured, not guessed: 1080p60 desktop content is already visually
+    // transparent inside 2.5 Mbps (spikes/codec-probe). A ceiling is not a
+    // target, but congestion control probes upward until it finds one, so
+    // leaving it at 8 Mbps bought queueing delay rather than picture.
     profile: {
       width: 1920,
       height: 1080,
       frameRate: 60,
-      maxBitrateBps: 8_000_000,
+      maxBitrateBps: 5_000_000,
       degradationPreference: "maintain-resolution",
       contentHint: "detail",
     },
   },
   smooth: {
     label: "Movimento suave",
-    detail: "1080p · 60 fps",
+    detail: "1080p · 60 fps · até 8 Mbps",
     profile: {
       width: 1920,
       height: 1080,
       frameRate: 60,
-      maxBitrateBps: 12_000_000,
+      // Twice what the demanding case measured at, which is headroom for
+      // motion rather than the 12 Mbps nothing was ever observed to use.
+      maxBitrateBps: 8_000_000,
       // Would rather lose pixels than stutter.
       degradationPreference: "maintain-framerate",
       contentHint: "detail",
@@ -71,7 +76,7 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualityPresetInfo> = {
     // size whose bitrate a residential uplink can actually carry. 720p60 costs
     // less than half the pixels of 1080p60 per second, which is what keeps
     // motion fluid where "Movimento suave" would be dropping to keep up.
-    detail: "720p · 60 fps",
+    detail: "720p · 60 fps · até 5 Mbps",
     profile: {
       width: 1280,
       height: 720,
@@ -86,7 +91,7 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualityPresetInfo> = {
   },
   game: {
     label: "Jogo",
-    detail: "1080p · 30 fps · leve",
+    detail: "1080p · 30 fps · até 6 Mbps",
     profile: {
       width: 1920,
       height: 1080,
@@ -101,12 +106,29 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualityPresetInfo> = {
   },
   thrifty: {
     label: "Economia de banda",
-    detail: "720p · 30 fps",
+    detail: "720p · 30 fps · até 2,5 Mbps",
     profile: {
       width: 1280,
       height: 720,
       frameRate: 30,
       maxBitrateBps: 2_500_000,
+      degradationPreference: "maintain-resolution",
+      contentHint: "detail",
+    },
+  },
+  weak: {
+    label: "Conexão fraca",
+    // The floor of the list, for an uplink that cannot carry the one above it.
+    // Named for when to pick it rather than for its bitrate: someone whose
+    // share keeps stalling knows their connection is bad, not what 1,2 Mbps
+    // buys. Resolution goes before frame rate here because a stalling picture
+    // is what sent them looking for this preset in the first place.
+    detail: "480p · 30 fps · até 1,2 Mbps",
+    profile: {
+      width: 854,
+      height: 480,
+      frameRate: 30,
+      maxBitrateBps: 1_200_000,
       degradationPreference: "maintain-resolution",
       contentHint: "detail",
     },

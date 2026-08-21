@@ -1,0 +1,285 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Codec comparison</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background:#12131a; color:#e6e6ee; font:14px/1.55 ui-sans-serif,system-ui,sans-serif; margin:0; padding:24px 28px; }
+  h1 { font-size:19px; margin:0 0 4px; } h2 { font-size:15px; margin:24px 0 8px; color:#9fb4ff; }
+  .sub { color:#8b8da0; margin:0 0 16px; }
+  table { border-collapse:collapse; margin:6px 0; font-size:13px; width:100%; }
+  th,td { border:1px solid #303650; padding:5px 9px; text-align:left; }
+  th { background:#1c2033; }
+  code,pre,.mono { font-family:ui-monospace,Consolas,monospace; }
+  pre { background:#0c0d14; border:1px solid #262b40; border-radius:7px; padding:11px 13px; overflow-x:auto; font-size:12.5px; white-space:pre-wrap; }
+  .good{color:#66dd99;font-weight:600}.bad{color:#ff8a80;font-weight:600}.warn{color:#ffc46b}.dim{color:#8b8da0}
+  canvas { display:none; }
+  video { width:256px; border:1px solid #303650; border-radius:6px; }
+</style>
+<h1>Janja Share — cross-codec comparison</h1>
+<p class="sub">Every codec encodes the <b>same deterministic 1080p frames</b> at the same
+bitrate cap. Quality is real PSNR against the exact source frame, recovered via a binary
+counter stamped into the picture — QP cannot be compared across codecs.</p>
+<div id="out"></div>
+<h2>Log</h2><pre id="log"></pre>
+<canvas id="src" width="1920" height="1080"></canvas>
+<canvas id="ref" width="1920" height="1080"></canvas>
+<canvas id="rx"  width="1920" height="1080"></canvas>
+<p class="dim">decoded stream (must stay visible — a hidden video is not painted):</p>
+<div id="sinks"></div>
+
+<script>
+const logEl = document.getElementById("log"), out = document.getElementById("out");
+const log = (...a) => { logEl.textContent += a.join(" ") + "\n"; };
+const esc = s => String(s).replace(/[<>&]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+const md = [];
+
+/* ---- barcode: 14 bits, 64px blocks along the top ---- */
+const BITS = 16, BW = 60, BH = 60;
+
+/* Deterministic frame renderer. Pure in n, so any frame can be re-created
+   later for comparison instead of being buffered. */
+const tile = document.createElement("canvas"); tile.width = 240; tile.height = 135;
+{
+  const t = tile.getContext("2d"), img = t.createImageData(240,135);
+  let seed = 987654321;
+  const rnd = () => (seed = (seed*1664525+1013904223)>>>0) / 4294967296;
+  for (let i=0;i<img.data.length;i+=4){ const b=rnd();
+    img.data[i]=20+b*90; img.data[i+1]=40+b*120; img.data[i+2]=70+b*150; img.data[i+3]=255; }
+  t.putImageData(img,0,0);
+}
+function renderFrame(ctx, n) {
+  n = n & ((1 << BITS) - 1);   // content is periodic in the counter's width
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  const sx = (n*0.35)%60, sy = (n*0.22)%35;
+  ctx.drawImage(tile, sx, sy, 170, 96, 0, 0, 1920, 1080);
+  for (let k=0;k<18;k++){
+    const a = n*0.03 + k*0.7;
+    const x = 960 + Math.cos(a)*(250+k*40), y = 540 + Math.sin(a*1.27)*(170+k*28);
+    ctx.fillStyle = `hsl(${(k*21+n)%360} 88% 58%)`; ctx.fillRect(x-30,y-30,60,60);
+    ctx.strokeStyle = "#0b0b12"; ctx.lineWidth = 3; ctx.strokeRect(x-30,y-30,60,60);
+  }
+  ctx.fillStyle = "rgba(8,8,14,.82)"; ctx.fillRect(0,980,1920,100);
+  ctx.fillStyle = "#eaeaf5"; ctx.font = "bold 30px monospace";
+  ctx.fillText(`HP 87/100   MANA 42/60   frame ${n}`, 40, 1042);
+  // Counter last, so nothing overdraws it. Big high-contrast blocks survive
+  // heavy quantisation; a small or antialiased marker would not.
+  for (let i=0;i<BITS;i++){
+    ctx.fillStyle = ((n >> i) & 1) ? "#ffffff" : "#000000";
+    ctx.fillRect(i*BW, 0, BW, BH);
+  }
+}
+function readCounter(data, w) {
+  let n = 0;
+  for (let i=0;i<BITS;i++){
+    // average a 24x24 patch at each block centre - robust to ringing at edges
+    const cx = i*BW + BW/2, cy = BH/2; let sum = 0, cnt = 0;
+    for (let y=cy-12;y<cy+12;y++) for (let x=cx-12;x<cx+12;x++){
+      const o = ((y|0)*w + (x|0))*4;
+      sum += 0.299*data[o] + 0.587*data[o+1] + 0.114*data[o+2]; cnt++;
+    }
+    if (sum/cnt > 128) n |= (1<<i);
+  }
+  return n;
+}
+function psnr(a, b, w, h) {
+  let se = 0, cnt = 0;
+  for (let y=BH;y<h;y++){            // skip the counter band entirely
+    for (let x=0;x<w;x++){
+      const o = (y*w+x)*4;
+      const ya = 0.299*a[o]+0.587*a[o+1]+0.114*a[o+2];
+      const yb = 0.299*b[o]+0.587*b[o+1]+0.114*b[o+2];
+      const d = ya-yb; se += d*d; cnt++;
+    }
+  }
+  const mse = se/cnt;
+  return mse === 0 ? 99 : 10*Math.log10(255*255/mse);
+}
+
+/* ---- live source ---- */
+const srcCtx = document.getElementById("src").getContext("2d",{alpha:false});
+let frameNo = 0;
+(function spin(){ renderFrame(srcCtx, frameNo++); if (frameNo < 900000) requestAnimationFrame(spin); })();
+const stream = document.getElementById("src").captureStream(60);
+
+/* ---- codec set ---- */
+const H264 = /h264/i, VP8=/vp8/i, VP9=/vp9/i, AV1=/av01|av1/i, H265=/h265|hevc/i;
+function plid(c){ const m=/profile-level-id=([0-9a-fA-F]{6})/.exec(c.sdpFmtpLine||""); return m?m[1].toUpperCase():""; }
+function candidates(){
+  const codecs = RTCRtpSender.getCapabilities("video").codecs;
+  const pick = [];
+  const h264 = codecs.filter(c=>H264.test(c.mimeType) && /packetization-mode=1/.test(c.sdpFmtpLine||""));
+  const base = h264.find(c=>plid(c).startsWith("42"));
+  const main = h264.find(c=>plid(c).startsWith("4D"));
+  const high = h264.find(c=>plid(c).startsWith("64"));
+  if (base) pick.push({name:`H.264 Baseline (${plid(base)})`, codec:base});
+  if (main) pick.push({name:`H.264 Main (${plid(main)})`, codec:main});
+  if (high) {
+    pick.push({name:`H.264 High (negotiated)`, codec:high});
+    // The reference app reports avc1.640028 - High, level 4.0. Levels are
+    // worth separating: 3.1 is nominally below what 1080p60 requires, 4.0 is
+    // what the reference gets, 5.0 is what this sender actually advertises.
+    pick.push({name:`H.264 High 3.1 (forced 64001F)`, codec:high, forcePlid:"64001F"});
+    pick.push({name:`H.264 High 4.0 (forced 640028)`, codec:high, forcePlid:"640028"});
+    pick.push({name:`H.264 High 5.0 (forced 640032)`, codec:high, forcePlid:"640032"});
+  }
+  for (const [label,re] of [["VP8",VP8],["VP9",VP9],["AV1",AV1],["H.265",H265]]) {
+    const c = codecs.find(x=>re.test(x.mimeType));
+    if (c) pick.push({name:label, codec:c});
+  }
+  return pick;
+}
+
+
+/* Pin an exact profile-level-id by rewriting the answer pc1 receives.
+   The level the *encoder* obeys is the one the remote end declares it can
+   accept, so munging the remote description is enough — and unlike munging a
+   local description, Chromium allows it without complaint. Only one H.264
+   payload survives setCodecPreferences, so the blanket replace is safe. */
+function forceProfile(sdp, target) {
+  return sdp.replace(/a=fmtp:(\d+) ([^\r\n]*profile-level-id=)[0-9a-fA-F]{6}/g,
+                     (_m, pt, pre) => `a=fmtp:${pt} ${pre}${target}`);
+}
+
+async function run({name, codec, cap, seconds, forcePlid}) {
+  while (document.visibilityState === "hidden") {
+    log(`[${name}] backgrounded - waiting for focus…`);
+    await new Promise(r=>{ const h=()=>{ if(document.visibilityState==="visible"){document.removeEventListener("visibilitychange",h);r();} };
+      document.addEventListener("visibilitychange",h); });
+  }
+  const pc1 = new RTCPeerConnection(), pc2 = new RTCPeerConnection();
+  pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate).catch(()=>{});
+  pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate).catch(()=>{});
+  const sink = document.createElement("video");
+  sink.autoplay = true; sink.muted = true; sink.playsInline = true;
+  document.getElementById("sinks").replaceChildren(sink);
+  const got = new Promise(res => { pc2.ontrack = e => { sink.srcObject = e.streams[0]; res(); }; });
+
+  pc1.addTrack(stream.getVideoTracks()[0], stream);
+  for (const t of pc1.getTransceivers()) if (t.sender.track?.kind==="video") {
+    try { t.setCodecPreferences([codec]); } catch(e){ log(`[${name}] setCodecPreferences: ${e.message}`); }
+  }
+  const offer = await pc1.createOffer(); await pc1.setLocalDescription(offer);
+  await pc2.setRemoteDescription(offer);
+  const ans = await pc2.createAnswer(); await pc2.setLocalDescription(ans);
+  const answerSdp = forcePlid ? forceProfile(ans.sdp, forcePlid) : ans.sdp;
+  if (forcePlid) {
+    const seen = /profile-level-id=([0-9a-fA-F]{6})/.exec(answerSdp);
+    log(`[${name}] answer fmtp pinned to ${seen ? seen[1] : "??"}`);
+  }
+  await pc1.setRemoteDescription({ type:"answer", sdp: answerSdp });
+
+  const sender = pc1.getSenders().find(s=>s.track?.kind==="video");
+  const p = sender.getParameters();
+  p.encodings = p.encodings?.length ? p.encodings : [{}];
+  for (const e of p.encodings){ e.maxBitrate = cap; e.scaleResolutionDownBy = 1; delete e.maxFramerate; }
+  p.degradationPreference = "maintain-resolution";
+  await sender.setParameters(p);
+
+  await got;
+  try { await sink.play(); } catch (e) { log(`[${name}] play(): ${e.message}`); }
+  await sleep(6000);                    // connect + let rate control settle
+
+  const stat = async () => { const r = await pc1.getStats(); let o=null,c=null;
+    r.forEach(s=>{ if(s.type==="outbound-rtp"&&s.kind==="video") o=s; });
+    if (o?.codecId) c = r.get(o.codecId); return {o,c,t:performance.now()}; };
+
+  const a = await stat();
+  const rxCtx = document.getElementById("rx").getContext("2d",{alpha:false,willReadFrequently:true});
+  const refCtx= document.getElementById("ref").getContext("2d",{alpha:false,willReadFrequently:true});
+  const samples = [];
+  const deadline = performance.now() + seconds*1000;
+  let hidden = false, badRead = 0, badMatch = 0;
+  while (performance.now() < deadline) {
+    await sleep(700);
+    if (document.visibilityState === "hidden") {
+      hidden = true;
+      log(`[${name}] backgrounded mid-run - pausing sampler…`);
+      await new Promise(r=>{ const h=()=>{ if(document.visibilityState==="visible"){
+        document.removeEventListener("visibilitychange",h); r(); } };
+        document.addEventListener("visibilitychange",h); });
+      continue;
+    }
+    if (!sink.videoWidth) continue;
+    rxCtx.drawImage(sink, 0, 0, 1920, 1080);
+    const rx = rxCtx.getImageData(0,0,1920,1080).data;
+    const n = readCounter(rx, 1920);
+    if (n < 1 || n > frameNo + 5) {                       // counter unreadable
+      if (badRead < 3) {
+        let sum = 0, cnt = 0;
+        for (let y=0;y<BH;y+=4) for (let x=0;x<BITS*BW;x+=4){
+          const o=(y*1920+x)*4; sum += 0.299*rx[o]+0.587*rx[o+1]+0.114*rx[o+2]; cnt++; }
+        log(`[${name}] bad counter read: n=${n} frameNo=${frameNo} ` +
+            `stripMeanLuma=${(sum/cnt).toFixed(1)} rx=${sink.videoWidth}x${sink.videoHeight} ` +
+            `readyState=${sink.readyState} paused=${sink.paused} time=${sink.currentTime.toFixed(2)}`);
+      }
+      badRead++; continue;
+    }
+    const at = (k) => { renderFrame(refCtx, k);
+      return psnr(refCtx.getImageData(0,0,1920,1080).data, rx, 1920, 1080); };
+    const q = at(n), qm = at(n-1), qp = at(n+1);
+    if (!(q > qm && q > qp)) {
+      // The counter pointed at a frame that matches no better than its
+      // neighbours, so it did not identify this frame. Refuse the sample.
+      if (badMatch < 3) log(`[${name}]   REJECT n=${n} frameNo=${frameNo} ` +
+        `psnr(n-1,n,n+1)=${qm.toFixed(1)},${q.toFixed(1)},${qp.toFixed(1)}`);
+      badMatch++; continue;
+    }
+    if (samples.length < 2) log(`[${name}]   sample n=${n} t=${sink.currentTime.toFixed(2)} ` +
+      `PSNR=${q.toFixed(2)} (neighbours ${qm.toFixed(1)}/${qp.toFixed(1)})`);
+    samples.push(q);
+  }
+  const b = await stat();
+  const rxW = sink.videoWidth, rxH = sink.videoHeight;
+  pc1.close(); pc2.close();
+  sink.pause(); sink.srcObject = null; sink.remove();
+
+  if (!a.o || !b.o) { log(`[${name}] no stats`); return null; }
+  const dt=(b.t-a.t)/1000, dB=b.o.bytesSent-a.o.bytesSent, dF=b.o.framesEncoded-a.o.framesEncoded;
+  const dE=(b.o.totalEncodeTime??0)-(a.o.totalEncodeTime??0);
+  samples.sort((x,y)=>x-y);
+  const med = samples.length ? samples[samples.length>>1] : null;
+  const r = { name, negotiated:(b.c?.mimeType??"?")+(plid(b.c||{})?" "+plid(b.c):""),
+    kbps:Math.round(dB*8/dt/1000), fps:+(dF/dt).toFixed(1), res:`${b.o.frameWidth}x${b.o.frameHeight}`,
+    rx:`${rxW}x${rxH}`, psnr: med===null?null:+med.toFixed(2), n:samples.length, badRead, badMatch,
+    msPerFrame: dF?+(dE*1000/dF).toFixed(2):null, limit:b.o.qualityLimitationReason??"?", hidden };
+  log(`[${name}] ${r.negotiated} | ${r.kbps}kbps ${r.fps}fps ${r.res} | PSNR ${r.psnr}dB (n=${r.n}, unreadable=${badRead}, rejected=${badMatch}) | ${r.msPerFrame}ms/frame | ${r.limit}${hidden?" | BACKGROUNDED":""}`);
+  return r;
+}
+
+async function main() {
+  const CAP = 2_500_000;
+  const list = candidates();
+  log("codecs to test: " + list.map(c=>c.name).join(", "));
+  log(`cap ${CAP/1e6} Mbps, 1080p pinned, identical deterministic frames\n`);
+  const results = [];
+  for (const c of list) { results.push(await run({...c, cap:CAP, seconds:18})); await sleep(1200); }
+
+  const ok = results.filter(Boolean);
+  const best = Math.max(...ok.filter(r=>r.psnr!==null && !r.hidden).map(r=>r.psnr));
+  ok.sort((x,y)=>(y.psnr??-1)-(x.psnr??-1));
+  const rows = ok.map(r=>`<tr>
+    <td>${esc(r.name)}</td><td class="mono" style="font-size:12px">${esc(r.negotiated)}</td>
+    <td class="${r.psnr===best?"good":""}">${r.psnr ?? "—"}</td>
+    <td>${r.kbps}</td><td>${r.fps}</td><td>${esc(r.res)}</td><td>${r.msPerFrame ?? "—"}</td>
+    <td>${esc(r.limit)}</td><td class="${r.hidden?"bad":"dim"}">${r.hidden?"BACKGROUNDED":(r.n<6?`only ${r.n} samples`:"ok")}</td></tr>`).join("");
+  out.innerHTML = `<h2>Results @ 2.5 Mbps, 1080p</h2><table>
+    <tr><th>codec</th><th>negotiated</th><th>PSNR dB</th><th>kbps</th><th>fps</th><th>enc res</th>
+    <th>ms/frame</th><th>limited by</th><th>valid</th></tr>${rows}</table>
+    <p class="dim">Higher PSNR is better; +3 dB ≈ half the error energy. ms/frame is the sharer's
+    cost <b>per viewer</b>.</p>`;
+
+  md.push("| codec | negotiated | PSNR dB | kbps | fps | enc res | ms/frame | limited by | valid |");
+  md.push("|---|---|---|---|---|---|---|---|---|");
+  for (const r of ok) md.push(`| ${r.name} | \`${r.negotiated}\` | ${r.psnr ?? "—"} | ${r.kbps} | ${r.fps} | ${r.res} | ${r.msPerFrame ?? "—"} | ${r.limit} | ${r.hidden?"BACKGROUNDED":(r.n<6?`only ${r.n} samples`:`ok (n=${r.n})`)} |`);
+
+  await fetch("/results",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({status:"done",ua:navigator.userAgent,markdown:md.join("\n"),log:logEl.textContent})}).catch(()=>{});
+  log("\nposted");
+}
+addEventListener("load", () => main().catch(async e => {
+  log("FAILED: " + (e&&e.stack||e));
+  await fetch("/results",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({status:"error",error:String(e&&e.stack||e),log:logEl.textContent,markdown:md.join("\n")})}).catch(()=>{});
+}));
+</script>

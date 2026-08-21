@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ORDER } from "../features/settings/QualityScreen.js";
 import {
   QUALITY_PRESETS,
   loadPreset,
@@ -38,17 +39,31 @@ describe("quality presets", () => {
     }
   });
 
-  it("leaves automatic on the numbers the app already used", () => {
-    // Naming the existing behaviour must not change it: anyone who never
-    // opens this screen has to get exactly the share they got before.
+  it("asks for the full picture, inside a ceiling measurement can justify", () => {
+    // This used to pin 8 Mbps on the grounds that whoever never opens the
+    // quality screen should get exactly the share they got before. That held
+    // until the figure was measured: 1080p60 desktop content is visually
+    // transparent inside 2.5 Mbps (spikes/codec-probe), so the extra five
+    // megabits bought queueing delay rather than picture. Resolution and
+    // frame rate are unchanged — only the ceiling moved.
     expect(QUALITY_PRESETS.auto.profile).toEqual({
       width: 1920,
       height: 1080,
       frameRate: 60,
-      maxBitrateBps: 8_000_000,
+      maxBitrateBps: 5_000_000,
       degradationPreference: "maintain-resolution",
       contentHint: "detail",
     });
+  });
+
+  it("keeps the default ceiling clear of the floor a panel viewer scales it to", () => {
+    // A panel viewer gets the ceiling divided by nine, and
+    // viewer-connection-manager refuses to go below 500 kbps. The thrifty
+    // preset is deliberately low enough to land on that floor — that is what
+    // the floor is for. The default is not allowed to, because a default that
+    // clamps makes the scaling vacuous for everyone who never opens this
+    // screen, which is most people.
+    expect(QUALITY_PRESETS.auto.profile.maxBitrateBps / 9).toBeGreaterThan(500_000);
   });
 
   it("lets only the motion presets give up pixels to keep frames", () => {
@@ -82,6 +97,31 @@ describe("quality presets", () => {
     );
     expect(QUALITY_PRESETS.game.profile.frameRate).toBeLessThan(
       QUALITY_PRESETS.smooth.profile.frameRate,
+    );
+  });
+
+  it("shows every preset in the screen that lists them", () => {
+    // A preset missing from ORDER is simply invisible: it type-checks, it
+    // tests, and no one can ever pick it. Nothing else catches that.
+    expect([...ORDER].sort()).toEqual(Object.keys(QUALITY_PRESETS).sort());
+  });
+
+  it("says what each preset costs, not only what it is for", () => {
+    // The label names the use ("Jogo"); without the ceiling in the detail
+    // line, nothing on screen tells you what picking it spends.
+    for (const [name, preset] of Object.entries(QUALITY_PRESETS)) {
+      expect(preset.detail, name).toMatch(/\d(,\d)? Mbps/);
+    }
+  });
+
+  it("offers a rung below thrifty for a link that cannot carry it", () => {
+    expect(QUALITY_PRESETS.weak.profile.maxBitrateBps).toBeLessThan(
+      QUALITY_PRESETS.thrifty.profile.maxBitrateBps,
+    );
+    // Fewer pixels as well as fewer bits: 720p inside 1,2 Mbps would be a
+    // ceiling the resolution cannot live under.
+    expect(QUALITY_PRESETS.weak.profile.height).toBeLessThan(
+      QUALITY_PRESETS.thrifty.profile.height,
     );
   });
 

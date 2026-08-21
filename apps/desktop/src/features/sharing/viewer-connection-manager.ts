@@ -89,11 +89,19 @@ const MIN_BITRATE_BPS = 500_000;
  */
 function ceilingFor(maxBitrateBps: number, size: ViewSize): number {
   const scale = SCALE_FOR[size];
-  return Math.max(MIN_BITRATE_BPS, Math.round(maxBitrateBps / (scale * scale)));
+  // A flat floor stops meaning anything once the preset itself is low: every
+  // ceiling at or below 4.5 Mbps scales to less than the floor, so "Economia
+  // de banda" and "Conexão fraca" would hand a panel viewer the exact same
+  // rate and the lower preset would do nothing for the person who picked it.
+  // Cap the floor at a third of the chosen ceiling so it stays a guard against
+  // an unreadable picture rather than an override of a deliberate choice.
+  const floor = Math.min(MIN_BITRATE_BPS, Math.round(maxBitrateBps / 3));
+  return Math.max(floor, Math.round(maxBitrateBps / (scale * scale)));
 }
 
 const DEFAULT_ENCODING: EncodingSettings = {
-  maxBitrateBps: 8_000_000,
+  // Kept in step with the "auto" preset in services/settings.ts.
+  maxBitrateBps: 5_000_000,
   // Screen content is unreadable when resolution is sacrificed, so drop frames
   // instead of pixels when bandwidth gets tight.
   degradationPreference: "maintain-resolution",
