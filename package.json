@@ -12,7 +12,8 @@
     "dev:signal": "pnpm --filter @janja/signaling dev",
     "dev:tunnel": "bash scripts/tunnel.sh",
     "dev:turn": "docker compose -f infra/coturn/docker-compose.yml up",
-    "sync:win": "bash scripts/sync-windows.sh"
+    "sync:win": "bash scripts/sync-windows.sh",
+    "version:bump": "bash scripts/bump-version.sh"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

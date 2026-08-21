@@ -7,7 +7,7 @@
  * a combination no one wants and every separate control invites.
  */
 
-export type QualityPreset = "auto" | "sharp" | "smooth" | "game" | "thrifty";
+export type QualityPreset = "auto" | "smooth" | "video" | "game" | "thrifty";
 
 export interface QualityProfile {
   /** Hints, not demands. Real capture adapts to the monitor and the GPU. */
@@ -52,22 +52,6 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualityPresetInfo> = {
       contentHint: "detail",
     },
   },
-  sharp: {
-    label: "Texto nítido",
-    // Screen content is mostly still. Spending the budget on pixels rather
-    // than on frames is what makes small text readable at the other end.
-    detail: "1440p · 15 fps",
-    profile: {
-      width: 2560,
-      height: 1440,
-      frameRate: 15,
-      maxBitrateBps: 6_000_000,
-      degradationPreference: "maintain-resolution",
-      // The one preset named for text says so. "detail" protects sharpness in
-      // general; "text" is the encoder being told what the sharpness is for.
-      contentHint: "text",
-    },
-  },
   smooth: {
     label: "Movimento suave",
     detail: "1080p · 60 fps",
@@ -76,9 +60,28 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualityPresetInfo> = {
       height: 1080,
       frameRate: 60,
       maxBitrateBps: 12_000_000,
-      // The one preset that would rather lose pixels than stutter.
+      // Would rather lose pixels than stutter.
       degradationPreference: "maintain-framerate",
       contentHint: "detail",
+    },
+  },
+  video: {
+    label: "Vídeo",
+    // For a film or a stream playing on the shared screen: every frame, at a
+    // size whose bitrate a residential uplink can actually carry. 720p60 costs
+    // less than half the pixels of 1080p60 per second, which is what keeps
+    // motion fluid where "Movimento suave" would be dropping to keep up.
+    detail: "720p · 60 fps",
+    profile: {
+      width: 1280,
+      height: 720,
+      frameRate: 60,
+      maxBitrateBps: 5_000_000,
+      // Video that stutters is worse than video that softens.
+      degradationPreference: "maintain-framerate",
+      // Film is motion, not edges: the same hint a game wants, for the same
+      // reason.
+      contentHint: "motion",
     },
   },
   game: {

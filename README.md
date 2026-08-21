@@ -21,6 +21,7 @@ packages/signaling-protocol/   wire types shared by server and client
 spikes/capture-probe/          throwaway WebView2 capture probe
 infra/coturn/                  TURN relay, for the VPS deployment
 scripts/make-icons.py          redraws every app and tray icon
+scripts/bump-version.sh        sets the app version in every file that holds it
 scripts/tunnel.sh              temporary public address via Cloudflare
 docs/superpowers/              design and implementation plans
 ```
@@ -52,7 +53,7 @@ time rather than loudly at boot.
 ## Tests
 
 ```bash
-pnpm test          # 331 tests
+pnpm test          # 337 tests
 pnpm typecheck
 bash scripts/check-rust.sh   # drives the Windows cargo over interop
 ```
@@ -79,6 +80,14 @@ pnpm install
 
 Requires Rust on Windows: `winget install Rustlang.Rustup`.
 
+Every build that leaves the machine gets a new version number first — the
+installer's filename carries it, and it is how you tell which build a friend
+is running:
+
+```bash
+pnpm version:bump 0.2.1     # tauri.conf.json, Cargo.toml, Cargo.lock, package.json
+```
+
 The signaling address is compiled in, so set it before building:
 
 ```powershell
@@ -103,8 +112,9 @@ saturates rather than dropping viewers.
 A copy is not always a whole stream, though. Every viewer tells its publisher
 whether it is showing the picture in the 320px panel or in fullscreen, and the
 publisher scales that one sender to match: a viewer in the panel costs roughly
-a ninth of the pixels of one in fullscreen. Since the panel is where everyone
-starts, the common case is far cheaper than the worst case.
+a ninth of the pixels of one in fullscreen, and at most 30 frames a second of
+them. Since the panel is where everyone starts, the common case is far cheaper
+than the worst case.
 
 Moving past the uplink ceiling entirely means an SFU, which this MVP
 deliberately does not build, but the WebRTC layer stays modular enough to add

@@ -58,6 +58,19 @@ interface ViewerEntry {
 const SCALE_FOR: Record<ViewSize, number> = { panel: 3, fullscreen: 1 };
 
 /**
+ * The most frames per second worth encoding for each size a viewer can report.
+ *
+ * A 312px panel cannot show the difference between 30 and 60 fps, but the
+ * sharer pays for every frame twice over — once per viewer, in an encoder that
+ * competes with whatever game is running. Fullscreen is left uncapped: there
+ * the preset's capture rate is the only ceiling that should apply.
+ */
+const MAX_FRAMERATE_FOR: Record<ViewSize, number | undefined> = {
+  panel: 30,
+  fullscreen: undefined,
+};
+
+/**
  * The floor under a scaled ceiling.
  *
  * Below this, screen text starts falling apart at any resolution, and the
@@ -296,9 +309,15 @@ export class ViewerConnectionManager {
         parameters.encodings = parameters.encodings?.length
           ? parameters.encodings
           : [{}];
+        const maxFramerate = MAX_FRAMERATE_FOR[size];
         for (const encoding of parameters.encodings) {
           encoding.maxBitrate = ceilingFor(maxBitrateBps, size);
           encoding.scaleResolutionDownBy = SCALE_FOR[size];
+          // Removed, not merely left alone: getParameters hands back whatever
+          // the last call set, so a cap applied in the panel would otherwise
+          // follow the viewer into fullscreen.
+          if (maxFramerate === undefined) delete encoding.maxFramerate;
+          else encoding.maxFramerate = maxFramerate;
         }
         parameters.degradationPreference = degradationPreference;
         void sender.setParameters(parameters);

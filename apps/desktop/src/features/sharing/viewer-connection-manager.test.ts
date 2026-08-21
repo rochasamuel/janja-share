@@ -431,6 +431,38 @@ describe("ViewerConnectionManager", () => {
       expect(pcFor(1).parametersOfVideoSender().encodings?.[0]?.maxBitrate).toBe(9_000_000);
     });
 
+    it("caps a panel viewer's frame rate: a 312px picture cannot show 60 fps", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+
+      // Half the frames is half the encoding work for that viewer, and the
+      // sharer is paying for one encoder per viewer while a game runs.
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxFramerate).toBe(30);
+    });
+
+    it("lifts the frame-rate cap for a viewer in fullscreen", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+
+      manager.setViewerSize("viewer-1", "fullscreen");
+
+      // Absent rather than a large number: the preset's capture rate is the
+      // only ceiling a fullscreen viewer should have.
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]).not.toHaveProperty(
+        "maxFramerate",
+      );
+    });
+
+    it("restores the cap when a fullscreen viewer goes back to the panel", async () => {
+      const { manager } = setup();
+      await manager.addViewer("viewer-1");
+      manager.setViewerSize("viewer-1", "fullscreen");
+
+      manager.setViewerSize("viewer-1", "panel");
+
+      expect(pcFor(0).parametersOfVideoSender().encodings?.[0]?.maxFramerate).toBe(30);
+    });
+
     it("ignores a size for a viewer that has already gone", () => {
       const { manager } = setup();
       expect(() => manager.setViewerSize("ghost", "fullscreen")).not.toThrow();

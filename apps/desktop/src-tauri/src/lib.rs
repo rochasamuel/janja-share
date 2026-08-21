@@ -90,7 +90,7 @@ fn set_picker_mode(
 
 #[tauri::command]
 fn hide_panel(window: tauri::WebviewWindow) {
-    let _ = window.hide();
+    popover::hide(&window);
 }
 
 /// Lets a fullscreen stream behave like any other window.
@@ -279,7 +279,9 @@ pub fn run() {
                 // which is the entire point of living in the tray.
                 if window.label() == "main" {
                     api.prevent_close();
-                    let _ = window.hide();
+                    if let Some(panel) = popover::main_window(window.app_handle()) {
+                        popover::hide(&panel);
+                    }
                 }
             }
             WindowEvent::Focused(false) => {
@@ -291,7 +293,9 @@ pub fn run() {
                     .map(|state| state.0.load(Ordering::Relaxed))
                     .unwrap_or(true);
                 if allowed {
-                    let _ = window.hide();
+                    if let Some(panel) = popover::main_window(window.app_handle()) {
+                        popover::hide(&panel);
+                    }
                 }
             }
             _ => {}

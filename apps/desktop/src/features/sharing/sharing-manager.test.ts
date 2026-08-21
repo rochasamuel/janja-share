@@ -190,17 +190,17 @@ describe("SharingManager quality", () => {
     await goLive();
     capture.videoTrack.applyConstraints.mockRejectedValueOnce(new Error("OverconstrainedError"));
 
-    await expect(manager.setQuality(QUALITY_PRESETS.sharp.profile)).resolves.toBeUndefined();
+    await expect(manager.setQuality(QUALITY_PRESETS.video.profile)).resolves.toBeUndefined();
     expect(manager.snapshot.state).toBe("sharing");
   });
 
   it("remembers a preset chosen while idle and uses it on the next share", async () => {
     const { manager, capture, goLive } = setup();
-    await manager.setQuality(QUALITY_PRESETS.sharp.profile);
+    await manager.setQuality(QUALITY_PRESETS.video.profile);
     await goLive();
 
     const video = capture.requested[0]?.video as MediaTrackConstraints;
-    expect(video.height).toEqual({ ideal: 1440 });
+    expect(video.height).toEqual({ ideal: 720 });
   });
 });
 

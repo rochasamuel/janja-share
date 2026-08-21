@@ -52,27 +52,27 @@ describe("quality presets", () => {
   });
 
   it("lets only the motion presets give up pixels to keep frames", () => {
-    for (const name of ["smooth", "game"] as const) {
+    for (const name of ["smooth", "video", "game"] as const) {
       expect(QUALITY_PRESETS[name].profile.degradationPreference, name).toBe(
         "maintain-framerate",
       );
     }
-    for (const name of ["auto", "sharp", "thrifty"] as const) {
+    for (const name of ["auto", "thrifty"] as const) {
       expect(QUALITY_PRESETS[name].profile.degradationPreference, name).toBe(
         "maintain-resolution",
       );
     }
   });
 
-  it("is the only preset that tells the encoder it is watching motion", () => {
+  it("tells the encoder it is watching motion only for a game or a video", () => {
     // The hint is what stops the encoder from spending its budget preserving
     // every edge of a scene that changes completely each frame.
-    expect(QUALITY_PRESETS.game.profile.contentHint).toBe("motion");
+    for (const name of ["game", "video"] as const) {
+      expect(QUALITY_PRESETS[name].profile.contentHint, name).toBe("motion");
+    }
     for (const name of ["auto", "smooth", "thrifty"] as const) {
       expect(QUALITY_PRESETS[name].profile.contentHint, name).toBe("detail");
     }
-    // The preset named for text is more specific still.
-    expect(QUALITY_PRESETS.sharp.profile.contentHint).toBe("text");
   });
 
   it("costs less to encode than every preset it competes with", () => {
@@ -91,12 +91,13 @@ describe("quality presets", () => {
     );
   });
 
-  it("trades frame rate for resolution on sharp text, and the reverse on motion", () => {
-    expect(QUALITY_PRESETS.sharp.profile.height).toBeGreaterThan(
-      QUALITY_PRESETS.smooth.profile.height,
-    );
-    expect(QUALITY_PRESETS.sharp.profile.frameRate).toBeLessThan(
-      QUALITY_PRESETS.smooth.profile.frameRate,
+  it("keeps every frame of a video, at a size the link can afford", () => {
+    expect(QUALITY_PRESETS.video.profile.frameRate).toBe(60);
+    expect(QUALITY_PRESETS.video.profile.height).toBe(720);
+    // Fewer pixels per second than smooth motion at 1080p, so the ceiling can
+    // sit lower without the picture falling apart.
+    expect(QUALITY_PRESETS.video.profile.maxBitrateBps).toBeLessThan(
+      QUALITY_PRESETS.smooth.profile.maxBitrateBps,
     );
   });
 });
@@ -149,9 +150,9 @@ describe("savePreset", () => {
 
 describe("storage access", () => {
   it("reads through the injected storage rather than a global", () => {
-    const store = storage({ "janja.quality": "sharp" });
+    const store = storage({ "janja.quality": "video" });
     const spy = vi.spyOn(store, "getItem");
-    expect(loadPreset(store)).toBe("sharp");
+    expect(loadPreset(store)).toBe("video");
     expect(spy).toHaveBeenCalledWith("janja.quality");
   });
 });

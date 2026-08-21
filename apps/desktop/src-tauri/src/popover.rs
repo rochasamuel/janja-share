@@ -1,4 +1,4 @@
-use tauri::{LogicalPosition, LogicalSize, Manager, PhysicalPosition, Runtime, WebviewWindow};
+use tauri::{LogicalPosition, LogicalSize, Manager, PhysicalPosition, Runtime, Webview, WebviewWindow};
 
 /// Gap between the panel and the tray icon, in physical pixels at 100% scale.
 const GAP: f64 = 12.0;
@@ -107,7 +107,7 @@ pub fn position_near_tray<R: Runtime>(
 /// Shows the panel at the tray, or hides it if it is already up.
 pub fn toggle<R: Runtime>(window: &WebviewWindow<R>, tray_rect: Option<(f64, f64, f64, f64)>) {
     if window.is_visible().unwrap_or(false) {
-        let _ = window.hide();
+        hide(window);
         return;
     }
     show(window, tray_rect);
@@ -115,6 +115,34 @@ pub fn toggle<R: Runtime>(window: &WebviewWindow<R>, tray_rect: Option<(f64, f64
 
 pub fn show<R: Runtime>(window: &WebviewWindow<R>, tray_rect: Option<(f64, f64, f64, f64)>) {
     position_near_tray(window, tray_rect);
+    reveal(window);
+}
+
+/// Hides the panel, and tells the webview so.
+///
+/// `window.hide()` alone hides the HWND and nothing else: WebView2 only learns
+/// that a page is hidden through its own `IsVisible`, and Tauri never sets it.
+/// Left visible, Chromium keeps compositing a window nobody can see — the
+/// live-status pulse alone is a 60 Hz animation for the whole of a share, and
+/// every frame of it competes with the game being shared. Marked hidden, the
+/// page stops painting and slows its timers, while capture, encoding, the
+/// peer connections and the audio worklet all carry on exactly as before:
+/// WebRTC was built to stream from background tabs.
+///
+/// Every path that hides the panel goes through here, because a hide that
+/// forgets the webview merely wastes, but a show that forgets it leaves the
+/// person looking at an empty frame.
+pub fn hide<R: Runtime>(window: &WebviewWindow<R>) {
+    let webview: &Webview<R> = window.as_ref();
+    let _ = webview.hide();
+    let _ = window.hide();
+}
+
+/// The other half of `hide`: the webview first, so the window never appears
+/// with nothing painted in it.
+fn reveal<R: Runtime>(window: &WebviewWindow<R>) {
+    let webview: &Webview<R> = window.as_ref();
+    let _ = webview.show();
     let _ = window.show();
     let _ = window.set_focus();
 }
@@ -138,8 +166,9 @@ pub fn enter_picker_mode<R: Runtime>(window: &WebviewWindow<R>) -> Option<SavedG
 
     let _ = window.set_size(LogicalSize::new(PICKER_SIZE.0, PICKER_SIZE.1));
     let _ = window.center();
-    let _ = window.show();
-    let _ = window.set_focus();
+    // The shortcut starts a share with the panel hidden, and a hidden panel
+    // has a hidden webview. The picker paints inside that webview.
+    reveal(window);
 
     saved
 }

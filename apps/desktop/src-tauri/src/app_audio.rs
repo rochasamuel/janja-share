@@ -40,6 +40,23 @@ pub const CHANNELS: u16 = 2;
 /// that audio does not drift audibly behind the picture.
 const BUFFER_DURATION_100NS: i64 = 1_000_000;
 
+/// How much audio to gather before handing it to the frontend: 40 ms.
+///
+/// Windows delivers loopback audio in 10 ms packets, and each delivery costs a
+/// full trip through Tauri's channel — a script evaluation in the webview plus
+/// a fetch back to Rust for the bytes, since a packet is larger than the
+/// direct-execute threshold. A hundred of those a second is a steady tax on
+/// the machine that is also running the game. Four packets per trip cuts it to
+/// twenty-five, for a delay the viewer cannot perceive: audio is already well
+/// ahead of a picture that has to be captured, encoded and jitter-buffered.
+const BATCH_FRAMES: usize = SAMPLE_RATE as usize * 40 / 1000;
+
+/// How long to wait for the next packet before sending what is already held.
+///
+/// A game that falls silent stops producing packets, and the last slice of
+/// its sound must not sit here until it speaks again.
+const FLUSH_TIMEOUT_MS: u32 = 50;
+
 /// A `PROPVARIANT` holding a blob.
 ///
 /// Hand-rolled because windows-rs models `PROPVARIANT` as an opaque type with
@@ -280,12 +297,18 @@ where
 
     report(startup, Ok(()));
 
-    let mut scratch: Vec<f32> = Vec::with_capacity(4096);
+    let batch_samples = BATCH_FRAMES * CHANNELS as usize;
+    let mut pending: Vec<f32> = Vec::with_capacity(batch_samples * 2);
 
     while !stop.load(Ordering::Relaxed) {
         // A timeout rather than an infinite wait: a silent app produces no
-        // events, and the loop still has to notice it was asked to stop.
-        if WaitForSingleObject(buffer_event, 200) != WAIT_OBJECT_0 {
+        // events, and the loop still has to notice it was asked to stop — and
+        // to send the tail of whatever it was holding.
+        if WaitForSingleObject(buffer_event, FLUSH_TIMEOUT_MS) != WAIT_OBJECT_0 {
+            if !pending.is_empty() {
+                on_audio(&pending);
+                pending.clear();
+            }
             continue;
         }
 
@@ -309,28 +332,32 @@ where
             }
 
             let samples = frames as usize * CHANNELS as usize;
-            scratch.clear();
-            scratch.reserve(samples);
 
             if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || data.is_null() {
                 // Windows may hand back a silent packet with no real buffer;
                 // the stream still needs those samples or it drifts.
-                scratch.resize(samples, 0.0);
+                pending.resize(pending.len() + samples, 0.0);
             } else {
                 match format {
                     SampleFormat::Float32 => {
                         let src = std::slice::from_raw_parts(data as *const f32, samples);
-                        scratch.extend_from_slice(src);
+                        pending.extend_from_slice(src);
                     }
                     SampleFormat::Int16 => {
                         let src = std::slice::from_raw_parts(data as *const i16, samples);
-                        scratch.extend(src.iter().map(|s| *s as f32 / 32768.0));
+                        pending.extend(src.iter().map(|s| *s as f32 / 32768.0));
                     }
                 }
             }
 
-            on_audio(&scratch);
+            // Copied out before the release: the buffer belongs to Windows
+            // again the moment ReleaseBuffer returns.
             let _ = capture.ReleaseBuffer(frames);
+
+            if pending.len() >= batch_samples {
+                on_audio(&pending);
+                pending.clear();
+            }
         }
     }
 

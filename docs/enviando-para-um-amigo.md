@@ -116,6 +116,19 @@ outro, porque rotacionar esse segredo invalida toda credencial já distribuída.
 
 ## 2. Gerando o instalador
 
+Antes de qualquer build que vá para a mão de alguém, **suba o número da
+versão**. Ele vai no nome do instalador, e é a única forma de saber qual build
+seu amigo está rodando quando algo der errado:
+
+```bash
+pnpm version:bump 0.2.1
+```
+
+Isso troca o número nos quatro arquivos que o guardam (`tauri.conf.json`,
+`Cargo.toml`, `Cargo.lock` e o `package.json` do desktop). Um build sem subir a
+versão sai com o nome do anterior, e dois instaladores diferentes com o mesmo
+nome é uma confusão garantida.
+
 O endereço da sinalização é compilado junto, então **só builde depois** de
 saber o endereço.
 
@@ -147,8 +160,8 @@ A saída vai para `apps\desktop\src-tauri\target\release\bundle\`:
 
 | Arquivo | Para quê |
 |---|---|
-| `nsis\Janja Share_0.1.0_x64-setup.exe` | **Mande este.** Instalador comum do Windows. |
-| `msi\Janja Share_0.1.0_x64_en-US.msi` | Para máquinas gerenciadas e política de grupo |
+| `nsis\Janja Share_0.2.0_x64-setup.exe` | **Mande este.** Instalador comum do Windows. |
+| `msi\Janja Share_0.2.0_x64_en-US.msi` | Para máquinas gerenciadas e política de grupo |
 
 Seu amigo não precisa instalar mais nada. Sem Node, sem Rust, sem terminal. O
 WebView2 já vem em todo Windows 11 e no Windows 10 atualizado; o instalador
@@ -261,6 +274,28 @@ reaproveitar. Por isso o preset importa tanto. Para jogar, use **Jogo**
 (`Ctrl ,`): metade dos quadros é metade do trabalho de encoding, e o
 `contentHint` de movimento impede o encoder de gastar orçamento preservando
 bordas de uma cena que muda inteira a cada quadro.
+
+### Se o jogo engasga enquanto compartilha
+
+Nesta ordem, porque cada passo é maior que o seguinte:
+
+1. **Preset Jogo** (`Ctrl ,`). O padrão "Automático" captura a 60 fps e pede
+   ao encoder para proteger nitidez — a combinação mais cara que existe para
+   um jogo. O preset vale na hora, sem parar a transmissão.
+2. **Encoder dizendo `· GPU`**. Se estiver `· CPU`, veja a seção abaixo; com
+   três espectadores em software nenhum preset salva.
+3. **Quem não precisa de tela cheia, que fique no painel.** Quem assiste no
+   painel recebe uma imagem a um terço da largura e no máximo 30 fps; quem
+   está em tela cheia recebe tudo. Seis espectadores em tela cheia é o pior
+   caso; seis no painel custa uma fração disso.
+4. **Feche o painel enquanto joga** (`Esc` até a tela inicial, e `Esc` de
+   novo; ou clique no ícone da bandeja). A transmissão continua; o que para
+   é o desenho de uma janela que ninguém está vendo.
+
+O que o app não consegue mudar: a captura de tela do Chromium copia cada
+quadro da GPU para a memória antes de encodar. Num monitor 4K a 60 fps isso
+são dois gigabytes por segundo só de cópia, e a única defesa é capturar menos
+quadros — o que o preset Jogo faz.
 
 ### Se continuar dizendo `· CPU`
 
