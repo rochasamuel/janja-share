@@ -1,0 +1,106 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Hardware encode probe</title>
+<style>
+  :root{color-scheme:dark}
+  body{background:#12131a;color:#e6e6ee;font:14px/1.55 ui-sans-serif,system-ui,sans-serif;margin:0;padding:24px 28px}
+  h1{font-size:19px;margin:0 0 4px}h2{font-size:15px;margin:22px 0 8px;color:#9fb4ff}
+  .sub{color:#8b8da0;margin:0 0 14px}
+  table{border-collapse:collapse;margin:6px 0;font-size:13px;width:100%}
+  th,td{border:1px solid #303650;padding:5px 9px;text-align:left}
+  th{background:#1c2033}
+  pre{background:#0c0d14;border:1px solid #262b40;border-radius:7px;padding:11px 13px;overflow-x:auto;font-size:12.5px;white-space:pre-wrap}
+  .yes{color:#66dd99;font-weight:600}.no{color:#ff8a80;font-weight:600}.dim{color:#8b8da0}
+  code{font-family:ui-monospace,Consolas,monospace}
+</style>
+<h1>Is the encoder hardware or software?</h1>
+<p class="sub"><code>mediaCapabilities.encodingInfo({type:"webrtc"})</code> reports
+<b>powerEfficient</b>, which is Chromium's own signal for a hardware-accelerated encoder —
+the same fact <code>edge://gpu</code> shows, but answerable per codec and per resolution.</p>
+<div id="out"></div>
+<h2>Log</h2><pre id="log"></pre>
+
+<script>
+const logEl=document.getElementById("log"), out=document.getElementById("out");
+const log=(...a)=>{logEl.textContent+=a.join(" ")+"\n";};
+const esc=s=>String(s).replace(/[<>&]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+const md=[];
+
+const SIZES=[
+  {w:1920,h:1080,fps:60,label:"1080p60"},
+  {w:1920,h:1080,fps:30,label:"1080p30"},
+  {w:1280,h:720, fps:60,label:"720p60"},
+  {w:854, h:480, fps:30,label:"480p30"},
+  {w:640, h:360, fps:30,label:"360p30 (panel)"},
+];
+const CODECS=[
+  {label:"H.264 High 4.0",     ct:'video/H264;codecs="avc1.640028"'},
+  {label:"H.264 High 5.0",     ct:'video/H264;codecs="avc1.640032"'},
+  {label:"H.264 Main",         ct:'video/H264;codecs="avc1.4d001f"'},
+  {label:"H.264 Baseline",     ct:'video/H264;codecs="avc1.42001f"'},
+  {label:"VP8",                ct:"video/VP8"},
+  {label:"VP9",                ct:'video/VP9;codecs="vp09.00.10.08"'},
+  {label:"AV1",                ct:'video/AV1;codecs="av01.0.04M.08"'},
+];
+
+async function probe(ct, s, bitrate){
+  try{
+    return await navigator.mediaCapabilities.encodingInfo({
+      type:"webrtc",
+      video:{ contentType:ct, width:s.w, height:s.h, bitrate, framerate:s.fps },
+    });
+  }catch(e){ return {error:e.name+": "+e.message}; }
+}
+
+async function main(){
+  if(!navigator.mediaCapabilities?.encodingInfo){
+    log("mediaCapabilities.encodingInfo unavailable in this build");
+    return;
+  }
+  log("UA: "+navigator.userAgent);
+  log("cores: "+navigator.hardwareConcurrency+"\n");
+
+  const rows=[];
+  for(const c of CODECS){
+    const cells=[];
+    for(const s of SIZES){
+      const r=await probe(c.ct, s, 2_500_000);
+      cells.push({size:s.label, ...r});
+      log(`${c.label.padEnd(18)} ${s.label.padEnd(16)} ` +
+          (r.error ? `ERROR ${r.error}`
+                   : `supported=${r.supported} smooth=${r.smooth} powerEfficient=${r.powerEfficient}`));
+    }
+    rows.push({codec:c.label, cells});
+  }
+
+  const mark=c=>{
+    if(c.error) return `<td class="dim" title="${esc(c.error)}">error</td>`;
+    if(!c.supported) return `<td class="no">unsupported</td>`;
+    return `<td class="${c.powerEfficient?"yes":"no"}">${c.powerEfficient?"HARDWARE":"software"}` +
+           `${c.smooth?"":' <span class="dim">(not smooth)</span>'}</td>`;
+  };
+  out.innerHTML = `<h2>powerEfficient — true means a hardware encoder</h2><table>
+    <tr><th>codec</th>${SIZES.map(s=>`<th>${esc(s.label)}</th>`).join("")}</tr>
+    ${rows.map(r=>`<tr><td>${esc(r.codec)}</td>${r.cells.map(mark).join("")}</tr>`).join("")}
+  </table>
+  <p class="dim">"not smooth" means Chromium expects it cannot sustain that frame rate.</p>`;
+
+  md.push(`cores: ${navigator.hardwareConcurrency}`, "");
+  md.push("| codec | "+SIZES.map(s=>s.label).join(" | ")+" |");
+  md.push("|---|"+SIZES.map(()=>"---").join("|")+"|");
+  for(const r of rows){
+    md.push("| "+r.codec+" | "+r.cells.map(c=>
+      c.error?"error":!c.supported?"unsupported":
+      (c.powerEfficient?"HARDWARE":"software")+(c.smooth?"":" (not smooth)")).join(" | ")+" |");
+  }
+
+  await fetch("/results",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({status:"done",ua:navigator.userAgent,markdown:md.join("\n"),log:logEl.textContent})}).catch(()=>{});
+  log("\nposted");
+}
+addEventListener("load",()=>main().catch(async e=>{
+  log("FAILED: "+(e&&e.stack||e));
+  await fetch("/results",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({status:"error",error:String(e&&e.stack||e),log:logEl.textContent,markdown:""})}).catch(()=>{});
+}));
+</script>

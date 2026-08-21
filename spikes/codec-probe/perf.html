@@ -1,0 +1,286 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Sharer cost probe</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background:#12131a; color:#e6e6ee; font:14px/1.55 ui-sans-serif,system-ui,sans-serif; margin:0; padding:24px 28px; }
+  h1{font-size:19px;margin:0 0 4px}h2{font-size:15px;margin:22px 0 8px;color:#9fb4ff}
+  .sub{color:#8b8da0;margin:0 0 14px}
+  table{border-collapse:collapse;margin:6px 0;font-size:13px;width:100%}
+  th,td{border:1px solid #303650;padding:5px 9px;text-align:left}
+  th{background:#1c2033}
+  pre{background:#0c0d14;border:1px solid #262b40;border-radius:7px;padding:11px 13px;overflow-x:auto;font-size:12.5px;white-space:pre-wrap}
+  .good{color:#66dd99;font-weight:600}.bad{color:#ff8a80;font-weight:600}.warn{color:#ffc46b;font-weight:600}.dim{color:#8b8da0}
+  canvas{width:320px;border:1px solid #303650;border-radius:6px}
+</style>
+<h1>Janja Share — what sharing costs the sharer</h1>
+<p class="sub">A heavy WebGL workload stands in for the game. Its GPU frame time is measured with
+<code>gl.finish()</code>, so vsync cannot hide spare headroom, then measured again while N
+encoders capture that same canvas.</p>
+<div id="out"></div>
+<h2>Log</h2><pre id="log"></pre>
+<canvas id="gl" width="1920" height="1080"></canvas>
+
+<script type="module">
+import { rankVideoCodecs } from "./shipped.mjs";
+const logEl=document.getElementById("log"), out=document.getElementById("out");
+const log=(...a)=>{logEl.textContent+=a.join(" ")+"\n";};
+const esc=s=>String(s).replace(/[<>&]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const md=[];
+
+const canvas=document.getElementById("gl");
+const gl=canvas.getContext("webgl2",{antialias:false,preserveDrawingBuffer:true,
+  powerPreference:"high-performance"});
+if(!gl) throw new Error("no webgl2");
+
+const VS=`#version 300 es
+in vec2 p; void main(){ gl_Position=vec4(p,0.,1.); }`;
+// Deliberately expensive per pixel: a long dependent loop the driver cannot
+// optimise away, so the workload behaves like a fragment-bound game rather
+// than like a blit.
+const FS=`#version 300 es
+precision highp float; uniform int iters; uniform float t; out vec4 o;
+void main(){
+  vec2 uv=gl_FragCoord.xy/vec2(1920.,1080.);
+  vec2 z=uv*2.-1.; float a=0.;
+  // Bounded on purpose. The first version of this used z=z*z+c, which diverges
+  // to infinity within ~10 iterations and broke out of the loop immediately -
+  // so the workload was trivial no matter how high iters went, and every
+  // measurement came back 0.00 ms. sin() keeps z in [-1,1] forever, which
+  // makes cost scale linearly with iters the way it has to.
+  for(int i=0;i<iters;i++){
+    z=sin(z.yx*2.7+vec2(a,t*0.01))*0.9;
+    a+=dot(z,z)*0.01;
+  }
+  o=vec4(fract(a),fract(a*1.7),fract(a*3.1),1.);
+}`;
+function sh(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
+const prog=gl.createProgram();
+gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));
+gl.linkProgram(prog);gl.useProgram(prog);
+const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+const loc=gl.getAttribLocation(prog,"p");gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+const uIters=gl.getUniformLocation(prog,"iters"), uT=gl.getUniformLocation(prog,"t");
+
+let ITERS=120, frame=0, sampling=false, samples=[], cpuSamples=[];
+const readback=new Uint8Array(4);
+
+/* A CPU-bound stand-in, measured in the same window as the GPU one.
+   The GPU workload alone cannot answer the question that matters: encoding
+   runs on CPU threads, so a game that is CPU-limited (game logic, draw calls,
+   physics) can lose frames even while GPU frame time is untouched. Without
+   this, "no GPU cost" would read as "sharing is free", which does not follow. */
+let CPU_ITERS=200000;
+function cpuChunk(){
+  let x=0;
+  for(let i=0;i<CPU_ITERS;i++){ x+=Math.sqrt(i%1024)*1.0000001; x%=100000; }
+  return x;
+}
+let cpuSink=0;
+function drawOnce(){
+  gl.viewport(0,0,1920,1080);
+  gl.uniform1i(uIters,ITERS); gl.uniform1f(uT,frame*0.016);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+function loop(){
+  const t0=performance.now();
+  drawOnce();
+  // readPixels, not finish(): Chromium queues GL commands to the GPU process
+  // and gl.finish() returned instantly, which is why this first reported
+  // 0.00 ms for every workload size. A one-pixel readback forces the round
+  // trip and makes the number real.
+  gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,readback);
+  const dt=performance.now()-t0;
+  const c0=performance.now();
+  cpuSink+=cpuChunk();
+  const cdt=performance.now()-c0;
+  frame++;
+  if(sampling){ samples.push(dt); cpuSamples.push(cdt); }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+const median=a=>{const s=[...a].sort((x,y)=>x-y);return s.length?s[s.length>>1]:NaN;};
+
+async function sample(ms){
+  while(document.visibilityState==="hidden"){
+    log("  backgrounded - waiting for focus…");
+    await new Promise(r=>{const h=()=>{if(document.visibilityState==="visible"){
+      document.removeEventListener("visibilitychange",h);r();}};
+      document.addEventListener("visibilitychange",h);});
+  }
+  samples=[]; cpuSamples=[]; sampling=true;
+  let hidden=false;
+  const watch=()=>{if(document.visibilityState==="hidden")hidden=true;};
+  document.addEventListener("visibilitychange",watch);
+  await sleep(ms);
+  sampling=false;
+  document.removeEventListener("visibilitychange",watch);
+  return {ms:median(samples), cpuMs:median(cpuSamples), n:samples.length, hidden};
+}
+
+/* Calibrate so the workload is genuinely GPU-bound but not so slow that rAF
+   only fires a handful of times: aim for ~10 ms a frame, i.e. a game that
+   would run near 100 fps with nothing competing. */
+async function calibrate(){
+  for(let round=0;round<6;round++){
+    const {ms}=await sample(700);
+    log(`calibrate: iters=${ITERS} -> ${ms.toFixed(2)} ms/frame`);
+    if(ms>7&&ms<14) break;
+    const scale=Math.max(0.25,Math.min(4,10/ms));
+    ITERS=Math.max(8,Math.round(ITERS*scale));
+  }
+}
+
+function makeEncoders(count, stream, {cap, scale, maxFramerate, degradationPreference}){
+  const pairs=[];
+  for(let i=0;i<count;i++){
+    const pc1=new RTCPeerConnection(), pc2=new RTCPeerConnection();
+    pc1.onicecandidate=e=>e.candidate&&pc2.addIceCandidate(e.candidate).catch(()=>{});
+    pc2.onicecandidate=e=>e.candidate&&pc1.addIceCandidate(e.candidate).catch(()=>{});
+    // Same track into every connection - exactly what ViewerConnectionManager
+    // does, and the reason cost multiplies by the size of the audience.
+    pc1.addTrack(stream.getVideoTracks()[0], stream);
+    // The shipped ranking, so this measures the codec the app really sends.
+    const ranked=rankVideoCodecs(RTCRtpSender.getCapabilities("video").codecs);
+    for(const tr of pc1.getTransceivers()) if(tr.sender.track?.kind==="video"){
+      try{ tr.setCodecPreferences(ranked); }catch(e){ log("setCodecPreferences: "+e.message); }
+    }
+    pairs.push({pc1,pc2,cap,scale,maxFramerate,degradationPreference});
+  }
+  return pairs;
+}
+
+async function connect(p){
+  const {pc1,pc2}=p;
+  const off=await pc1.createOffer(); await pc1.setLocalDescription(off);
+  await pc2.setRemoteDescription(off);
+  const a=await pc2.createAnswer(); await pc2.setLocalDescription(a); await pc1.setRemoteDescription(a);
+  const s=pc1.getSenders().find(x=>x.track?.kind==="video");
+  const par=s.getParameters();
+  par.encodings=par.encodings?.length?par.encodings:[{}];
+  for(const e of par.encodings){
+    e.maxBitrate=p.cap; e.scaleResolutionDownBy=p.scale;
+    if(p.maxFramerate) e.maxFramerate=p.maxFramerate; else delete e.maxFramerate;
+  }
+  par.degradationPreference=p.degradationPreference;
+  await s.setParameters(par);
+}
+
+async function encoderLoad(pairs){
+  let encMsPerSec=0, fps=0, res="", codec="";
+  for(const {pc1} of pairs){
+    const r1=await pc1.getStats(); let o1=null; r1.forEach(s=>{if(s.type==="outbound-rtp"&&s.kind==="video")o1=s;});
+    await sleep(0);
+    if(!o1) continue;
+    res=`${o1.frameWidth}x${o1.frameHeight}`;
+  }
+  // measure a delta window across all senders at once
+  const before=[];
+  for(const {pc1} of pairs){ const r=await pc1.getStats(); let o=null,c=null;
+    r.forEach(s=>{if(s.type==="outbound-rtp"&&s.kind==="video")o=s;});
+    if(o?.codecId)c=r.get(o.codecId);
+    before.push({o,c,t:performance.now()}); }
+  await sleep(3000);
+  for(let i=0;i<pairs.length;i++){
+    const r=await pairs[i].pc1.getStats(); let o=null;
+    r.forEach(s=>{if(s.type==="outbound-rtp"&&s.kind==="video")o=s;});
+    const b=before[i]; if(!o||!b.o) continue;
+    const dt=(performance.now()-b.t)/1000;
+    encMsPerSec += ((o.totalEncodeTime??0)-(b.o.totalEncodeTime??0))*1000/dt;
+    fps += (o.framesEncoded-b.o.framesEncoded)/dt;
+    res=`${o.frameWidth}x${o.frameHeight}`;
+    codec=(b.c?.mimeType??"").replace("video/","");
+  }
+  return {encMsPerSec, fps, res, codec};
+}
+
+const CONFIGS=[
+  {label:"nothing shared (baseline)", viewers:0},
+  {label:"1080p60 · 1 viewer",  viewers:1, capture:60, cap:5_000_000,  scale:1,    deg:"maintain-resolution"},
+  {label:"1080p60 · 3 viewers", viewers:3, capture:60, cap:5_000_000,  scale:1,    deg:"maintain-resolution"},
+  {label:"1080p30 · 3 viewers (preset Jogo)", viewers:3, capture:30, cap:6_000_000, scale:1, fr:30, deg:"maintain-framerate"},
+  {label:"480p30 · 3 viewers (preset Conexão fraca)", viewers:3, capture:30, cap:1_200_000, scale:2.25, fr:30, deg:"maintain-resolution"},
+  {label:"1080p60 · 3 viewers, panel scale (what viewers actually get)", viewers:3, capture:60, cap:Math.round(5_000_000/9), scale:3, fr:30, deg:"maintain-resolution"},
+];
+
+async function main(){
+  log("calibrating the stand-in workload…");
+  await calibrate();
+  for(let round=0;round<5;round++){
+    const probe=await sample(500);
+    log(`calibrate cpu: iters=${CPU_ITERS} -> ${probe.cpuMs.toFixed(2)} ms/frame`);
+    if(probe.cpuMs>2&&probe.cpuMs<6) break;
+    CPU_ITERS=Math.max(2000,Math.round(CPU_ITERS*Math.max(0.25,Math.min(4,3.5/probe.cpuMs))));
+  }
+  const base=await sample(3000);
+  log(`cores reported by the browser: ${navigator.hardwareConcurrency}`);
+  if(!(base.ms>0.5)){
+    log(`\nABORT: baseline is ${base.ms.toFixed(3)} ms/frame - the workload is not ` +
+        `measurable, so any "fps lost" figure would be noise. Not reporting numbers.`);
+    await fetch("/results",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({status:"error",error:"workload not measurable",log:logEl.textContent,markdown:""})}).catch(()=>{});
+    return;
+  }
+  log(`\nbaseline: ${base.ms.toFixed(2)} ms/frame  (~${(1000/base.ms).toFixed(0)} fps equivalent)  iters=${ITERS}\n`);
+
+  const rows=[];
+  for(const c of CONFIGS){
+    let pairs=[], stream=null, load={encMsPerSec:0,fps:0,res:"—",codec:"—"};
+    if(c.viewers>0){
+      stream=canvas.captureStream(c.capture);
+      pairs=makeEncoders(c.viewers, stream, {cap:c.cap, scale:c.scale, maxFramerate:c.fr, degradationPreference:c.deg});
+      for(const p of pairs) await connect(p);
+      await sleep(5000);                     // let rate control and the encoders settle
+      load=await encoderLoad(pairs);
+    }
+    const m=await sample(4000);
+    const lossPct=((m.ms-base.ms)/base.ms)*100;
+    const cpuLossPct=((m.cpuMs-base.cpuMs)/base.cpuMs)*100;
+    rows.push({label:c.label, ms:+m.ms.toFixed(2), fpsEq:Math.round(1000/m.ms),
+      cpuMs:+m.cpuMs.toFixed(2), cpuLossPct:+cpuLossPct.toFixed(1),
+      lossPct:+lossPct.toFixed(1), enc:Math.round(load.encMsPerSec), encFps:Math.round(load.fps),
+      res:load.res, codec:load.codec, hidden:m.hidden||base.hidden});
+    log(`${c.label}: gpu ${m.ms.toFixed(2)}ms (${lossPct>=0?"+":""}${lossPct.toFixed(1)}%)  ` +
+        `cpu ${m.cpuMs.toFixed(2)}ms (${cpuLossPct>=0?"+":""}${cpuLossPct.toFixed(1)}%)  ` +
+        `encoders ${Math.round(load.encMsPerSec)} ms/s ` +
+        `@ ${Math.round(load.fps)} fps total ${load.res} ${load.codec}${m.hidden?"  BACKGROUNDED":""}`);
+    for(const {pc1,pc2} of pairs){ pc1.close(); pc2.close(); }
+    if(stream) for(const t of stream.getTracks()) t.stop();
+    await sleep(1500);
+  }
+
+  const pct=v=>`<td class="${v>25?"bad":v>10?"warn":"good"}">${v>=0?"+":"−"}${Math.abs(v)}%</td>`;
+  const cell=r=>`<tr><td>${esc(r.label)}</td><td>${r.ms}</td>${pct(r.lossPct)}
+    <td>${r.cpuMs}</td>${pct(r.cpuLossPct)}
+    <td>${r.enc}</td><td>${r.encFps}</td><td class="mono">${esc(r.res)}</td>
+    <td class="${r.hidden?"bad":"dim"}">${r.hidden?"BACKGROUNDED":"ok"}</td></tr>`;
+  out.innerHTML=`<h2>Workload cost while sharing</h2><table>
+    <tr><th>configuration</th><th>GPU ms</th><th>GPU cost</th><th>CPU ms</th><th>CPU cost</th>
+    <th>encoder ms/s</th><th>frames/s encoded</th><th>enc res</th><th>valid</th></tr>
+    ${rows.map(cell).join("")}</table>
+    <p class="dim">"fps lost" is the change in the workload's own frame time versus the baseline —
+    what a game sharing the GPU would feel. "encoder ms/s" is summed across all viewers;
+    1000 ms/s is one full core.</p>`;
+
+  md.push(`cores: ${navigator.hardwareConcurrency}`);
+  md.push("");
+  md.push("| configuration | GPU ms | GPU cost | CPU ms | CPU cost | encoder ms/s | frames/s encoded | enc res | valid |");
+  md.push("|---|---|---|---|---|---|---|---|---|");
+  for(const r of rows) md.push(`| ${r.label} | ${r.ms} | ${r.lossPct}% | ${r.cpuMs} | ${r.cpuLossPct}% | ${r.enc} | ${r.encFps} | ${r.res} | ${r.hidden?"BACKGROUNDED":"ok"} |`);
+  md.push(`\nbaseline ${base.ms.toFixed(2)} ms/frame, shader iters=${ITERS}`);
+
+  await fetch("/results",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({status:"done",ua:navigator.userAgent,markdown:md.join("\n"),log:logEl.textContent})}).catch(()=>{});
+  log("\nposted");
+}
+addEventListener("load",()=>main().catch(async e=>{
+  log("FAILED: "+(e&&e.stack||e));
+  await fetch("/results",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({status:"error",error:String(e&&e.stack||e),log:logEl.textContent,markdown:md.join("\n")})}).catch(()=>{});
+}));
+</script>

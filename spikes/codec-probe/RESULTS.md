@@ -144,3 +144,142 @@ dramatically worse with an audience.
 - An earlier "hard content" run used near-white noise, which is incompressible;
   the encoder abandoned resolution (collapsed to 480x270) and the run was
   discarded. Replaced by the game-like source above.
+
+
+## 5 · What sharing costs the sharer (`perf.html`)
+
+A heavy WebGL workload stands in for the game; a heavy JS loop stands in for its
+CPU side. Both are measured in the same window, before and during sharing.
+Machine reports **16 cores**.
+
+| configuration | GPU ms | GPU cost | CPU ms | CPU cost | encoder ms/s | enc res |
+|---|---|---|---|---|---|---|
+| nothing shared | 9.6 | — | 2.6 | — | 0 | — |
+| 1080p60 · 1 viewer | 9.7 | 0% | 2.6 | 0% | 221 | 1920x1080 |
+| 1080p60 · 3 viewers | 9.7 | 0% | 2.6 | 0% | **2646** | 1920x1080 |
+| 1080p30 · 3 viewers (Jogo) | 10.6 | **+9.3%** | 2.6 | 0% | 1355 | 960x540 |
+| 480p30 · 3 viewers (Conexão fraca) | 10.5 | **+8.2%** | 2.7 | 0% | 133 | 853x480 |
+| 1080p60 · 3 viewers, panel scale | 10.6 | **+9.3%** | 2.6 | 0% | 885 | 640x360 |
+
+### On this machine, sharing costs the game nothing measurable
+
+Neither stand-in lost anything to CPU contention. 2646 ms/s of encoding is 2.6
+cores — spread across 16, it never touches a single-threaded workload.
+
+### Scaling the picture down costs GPU that sending it whole does not
+
+The three configurations that scale (`960x540`, `853x480`, `640x360`) each cost
+~9% GPU; the two that send native 1080p cost 0%. `scaleResolutionDownBy` is a
+per-viewer GPU resample, so asking for a smaller picture buys lower CPU and
+bitrate at the price of GPU work. **Panel scale is where every viewer starts**,
+so this is the common path, not an edge case.
+
+### The number that will not survive weaker hardware
+
+2.6 cores for three viewers at 1080p60 is comfortable on 16 cores and is most
+of a 4-core laptop. Core count, not the preset, is what decides whether sharing
+costs a game its frame rate — and this probe cannot test the machines where the
+answer changes.
+
+## Caveats on section 5
+
+- **The `frames/s encoded` column is not trustworthy**, and a later run showed
+  why. One viewer reported 15 fps while three reported 45 fps *each*, and the
+  same configuration gave 43 then 135 across two runs. A long single-stream run
+  (`warm.html`, 10 000+ frames) held a clean **60 fps at 1920x1080** throughout,
+  so the low figures were rate-control ramp over near-noise content, not a
+  throughput ceiling. Nothing above is built on that column.
+- **The stand-in is not a game.** It is one GPU-bound and one CPU-bound loop in
+  the same process as the encoders. A real game is a separate process with its
+  own GPU context and its own vsync.
+- **The rendered content is close to noise**, which is far harder to encode than
+  real game footage, so the encoder CPU figures are pessimistic.
+- Hardware encode is **enabled** — see section 6. An earlier note here inferred
+  software encoding from "8 ms/frame is too slow for hardware". That inference
+  was wrong and has been withdrawn: `totalEncodeTime` is submit-to-complete
+  latency, not CPU occupancy, so it says nothing about which encoder ran.
+
+
+## 6 · Hardware or software encoding? (settled)
+
+Read from Chromium's own `SystemInfo.getInfo` over the DevTools protocol —
+the data source behind `edge://gpu` — rather than by eye:
+
+```
+video_encode      enabled
+video_decode      enabled
+gpu_compositing   enabled
+AMD Radeon RX 9070 XT   0x1002:0x7550
+ANGLE (AMD, ... Direct3D11 vs_5_0 ps_5_0, D3D11-32.0.31035.1003)
+```
+
+**Hardware video encode is available and not blocklisted on this machine.**
+
+### A withdrawn inference
+
+Section 5 previously argued that 8 ms/frame was "too slow for a hardware
+encoder", implying software. That was unsound. `totalEncodeTime` measures
+submit-to-complete **latency**, and an asynchronous hardware encoder has fixed
+queue latency that has nothing to do with CPU occupancy. The same reasoning
+made VP8 (5 ms/frame, software-only everywhere) look "faster" than H.264, which
+should have been the clue that the metric was being misread.
+
+### What is still not determinable from here
+
+Whether a *given* WebRTC stream actually used the hardware path. Two routes
+were tried and both are dead ends on Edge 151:
+
+- `RTCOutboundRtpStreamStats.encoderImplementation` and `powerEfficientEncoder`
+  are absent from this build's stats entirely (full key dump in the probe log).
+- `SystemInfo.getInfo`'s `videoEncoding` profile array stays empty even after
+  the browser has encoded real H.264 frames, so its emptiness is not evidence.
+
+The practical answer is nonetheless good: hardware encode enabled, no
+measurable CPU cost to a CPU-bound workload, and ~9% GPU cost only on the
+configurations that rescale.
+
+### How it was read, for whoever needs it again
+
+`edge://gpu` cannot be fetched by a page or by curl, and WSL cannot reach the
+Windows loopback where Edge binds its debug port. What works:
+
+```bash
+# the profile directory's parent must exist, or Edge silently hands the URL
+# to the already-running instance and no debug port is ever opened
+msedge.exe --remote-debugging-port=9225 \
+  --user-data-dir='C:\Users\<you>\AppData\Local\Temp\cdp' \
+  --no-first-run --new-window about:blank
+# then drive it from the Windows side, which can reach its own loopback:
+powershell.exe -File cdp-gpu.ps1   # ClientWebSocket -> SystemInfo.getInfo
+```
+
+
+## 7 · Long-run confirmation (`warm.html`)
+
+One viewer, 1080p, 5 Mbps, 10 000+ frames:
+
+```
+frames=10039 1920x1080 codec=video/H264 64001f impl=(absent) power=(absent)
+```
+
+- **High profile is negotiated and stays negotiated** over a long stream, not
+  just at offer time. The shipped `rankVideoCodecs` holds.
+- **60 fps sustained at 1080p** (120 frames per 2 s tick, unbroken). Content is
+  easy — flat fills and one moving rect — so this shows the pipeline has no
+  inherent cap, not that a game would hold 60.
+- `encoderImplementation` / `powerEfficientEncoder` absent on a live sustained
+  stream, confirming section 6's dead end rather than inferring it.
+
+### One artifact worth not misreading
+
+Mid-run, `frames` froze and `frameWidth`/`frameHeight` became `undefined` for
+~46 s, then recovered. That is the probe, not the product: `warm.html` drives
+its canvas from `requestAnimationFrame`, which Chromium throttles to zero in a
+hidden window, so the *source* stopped and Chromium dropped the frame-size
+fields while nothing was being encoded.
+
+The app does not share this failure mode — `getDisplayMedia` frames come from
+the OS capture pipeline and WebRTC encodes on native threads, neither of which
+depends on the popover being visible. Worth proving on two machines with the
+panel closed before relying on it, since sharing while the panel is hidden is
+the app's main use.
